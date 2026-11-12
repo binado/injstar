@@ -1,0 +1,18 @@
+# Reference run: one binary black hole seen by LIGO Hanford, LIGO Livingston
+# and Virgo, on the packaged detector geometry and noise curves.
+#
+#   injstar run run.toml --output-dir out
+
+network = ["H1", "L1", "V1"]
+population = "population.csv"
+output_dir = "out"
+
+f_low = 20.0
+f_high = 1024.0
+sample_rate = 4096.0
+window_duration = 8.0
+crop_duration = 0.1
+seed = 0
+
+[prior]
+max_distance = 5000.0

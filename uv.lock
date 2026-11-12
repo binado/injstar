@@ -724,6 +724,47 @@ wheels = [
 ]
 
 [[package]]
+name = "gwmock-noise"
+version = "0.17.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.13'",
+]
+dependencies = [
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "scipy" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/af/57/19155adf840865f589dd5dd51478f5825971062244dc639038cf05b5097e/gwmock_noise-0.17.0.tar.gz", hash = "sha256:449780232fb0302ada7f303ae4d532ff3a8fd2db46be0a00a23edb77317a0078", size = 1744108, upload-time = "2026-10-18T13:41:30.281Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/74/79/d8491ab13cdf7071cc35f50bbc951e5a94382a33defce45dccd95066bd70/gwmock_noise-0.17.0-py3-none-any.whl", hash = "sha256:2cf22dfccbb567c6d69b7da7de1f17431e37c86ab77bf20dac0f6d71ef283f70", size = 1304117, upload-time = "2026-10-18T13:41:28.937Z" },
+]
+
+[[package]]
+name = "gwmock-noise"
+version = "0.23.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.15'",
+    "python_full_version == '3.14.*'",
+    "python_full_version == '3.13.*'",
+]
+dependencies = [
+    { name = "gwmock-data" },
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "scipy" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/58/38/9efa4a42c3a92f92753c098cb572608cc612d23e9268d88c74e56f6e9921/gwmock_noise-0.23.0.tar.gz", hash = "sha256:c335c0092e0015218d3169a50800cdd82df6c19f324230c6c806bc601e3f961e", size = 1947537, upload-time = "2026-11-10T09:24:47.93Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/18/f3/2a7967bacf9b5c316a9b9122906092a945709178d6a78141ec57d40b2254/gwmock_noise-0.23.0-py3-none-any.whl", hash = "sha256:03d4acb89b3168a5ca03a0dba8be738dcc19706a72c2fbcb74ee6894373c119a", size = 1485425, upload-time = "2026-11-10T09:24:46.273Z" },
+]
+
+[[package]]
 name = "gwmock-signal"
 version = "0.24.0"
 source = { registry = "https://pypi.org/simple" }
@@ -963,9 +1004,13 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "astropy" },
+    { name = "gwmock-noise", version = "0.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
+    { name = "gwmock-noise", version = "0.23.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "jax" },
     { name = "ligo-skymap" },
+    { name = "pydantic" },
     { name = "ripplegw" },
+    { name = "typer" },
 ]
 
 [package.optional-dependencies]
@@ -988,11 +1033,14 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "astropy", specifier = ">=8.0.2" },
+    { name = "gwmock-noise", specifier = ">=0.17.0" },
     { name = "gwmock-signal", marker = "python_full_version >= '3.13' and extra == 'validation'", specifier = ">=0.24.0" },
     { name = "jax", specifier = ">=0.12.0.1" },
     { name = "ligo-skymap", specifier = ">=2.5.4" },
     { name = "pycbc", marker = "extra == 'validation'", specifier = ">=2.11.0" },
+    { name = "pydantic", specifier = ">=2.14.3" },
     { name = "ripplegw", specifier = ">=0.5.1" },
+    { name = "typer", specifier = ">=0.29.1" },
 ]
 provides-extras = ["validation"]
 

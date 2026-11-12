@@ -6,11 +6,15 @@ import pytest
 
 MODULES = [
     "cli",
+    "config",
     "localize",
     "network",
+    "pipeline",
     "population",
     "products",
+    "projection",
     "psd",
+    "runtime",
     "simulate",
 ]
 
