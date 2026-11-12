@@ -1,0 +1,12 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY.
+_commit: d024844
+_src_path: gh:binado/pyquick
+author_email: bernardopveronese@gmail.com
+author_name: binado
+description: Simulated sky-distance posteriors with BAYESTAR for arbitrary detector
+    networks.
+github_username: binado
+project_name: injstar
+project_type: app
+publish_to_pypi: true
+python_min: '3.11'
