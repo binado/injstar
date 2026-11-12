@@ -15,6 +15,34 @@ def invoke(*args: object) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
+def use_named_network(config_file: Path) -> None:
+    detectors = config_file.parent / "network.toml"
+    detectors.write_text('[networks]\nregression = ["H1", "L1", "V1"]\n')
+    config_file.write_text(
+        config_file.read_text().replace(
+            'network = ["H1", "L1", "V1"]',
+            'network = "regression"\ndetector_config = ["network.toml"]',
+        )
+    )
+
+
+def test_named_network_matches_explicit_detectors(config_file: Path) -> None:
+    explicit = config_file.parent / "explicit"
+    named = config_file.parent / "named"
+    code, output = invoke("snr", config_file, "--output-dir", explicit)
+    assert code == 0, output
+
+    use_named_network(config_file)
+    code, output = invoke("snr", config_file, "--output-dir", named)
+    assert code == 0, output
+
+    expected, _ = products.read_table(explicit / "injections.h5")
+    actual, _ = products.read_table(named / "injections.h5")
+    assert actual.keys() == expected.keys()
+    for name, values in expected.items():
+        np.testing.assert_array_equal(actual[name], values)
+
+
 def test_snr_writes_injections_and_no_maps(config_file: Path) -> None:
     code, output = invoke("snr", config_file)
 
@@ -91,7 +119,10 @@ def test_invalid_config_reports_an_error(config_file: Path) -> None:
 
 
 @pytest.mark.slow
-def test_run_resume_and_summarise(config_file: Path) -> None:
+@pytest.mark.parametrize("named_network", [False, True], ids=["explicit", "named"])
+def test_run_resume_and_summarise(config_file: Path, named_network: bool) -> None:
+    if named_network:
+        use_named_network(config_file)
     out = config_file.parent / "out"
     assert invoke("snr", config_file)[0] == 0
 

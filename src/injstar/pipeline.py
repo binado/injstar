@@ -160,7 +160,10 @@ def _simulator(inputs: Inputs):  # noqa: ANN202 - simulate imports JAX
     events = simulation_events(
         inputs.population, greenwich_sidereal_time(inputs.population["coa_time"])
     )
-    return Simulator(inputs.config, inputs.registry), events
+    resolved_config = inputs.config.model_copy(
+        update={"network": inputs.registry.members("selected")}
+    )
+    return Simulator(resolved_config, inputs.registry), events
 
 
 def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
