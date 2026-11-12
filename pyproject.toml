@@ -8,7 +8,12 @@ authors = [
     { name = "binado", email = "bernardopveronese@gmail.com" },
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "astropy>=8.0.2",
+    "jax>=0.12.0.1",
+    "ligo-skymap>=2.5.4",
+    "ripplegw>=0.5.1",
+]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
@@ -32,6 +37,12 @@ Issues = "https://github.com/binado/injstar/issues"
 
 [project.scripts]
 "injstar" = "injstar.__main__:main"
+
+[project.optional-dependencies]
+validation = [
+    "gwmock-signal>=0.24.0 ; python_full_version >= '3.13'",
+    "pycbc>=2.11.0",
+]
 
 
 [build-system]

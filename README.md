@@ -22,8 +22,8 @@ The underlying command is `uv sync --all-groups` if Just is unavailable.
 ## Run
 
 ```console
-just run
-# Equivalent to: uv run injstar
+just run --help
+# Equivalent to: uv run injstar --help
 ```
 
 
