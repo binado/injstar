@@ -9,8 +9,9 @@ consumer among several: it reads the output files and has no dependency on the
 package.
 
 This is a design plan based on documentation and source inspection. No
-interoperability test or benchmark has been run. Statements marked *(verify)* come
-from memory of the ligo.skymap source and must be confirmed in step 0.
+interoperability test or benchmark has been run. The statements about the
+ligo.skymap source were checked against ligo.skymap 2.5.4 in step 0; the findings
+and source locations are in [audit.md](audit.md).
 
 ## Scope
 
@@ -45,8 +46,10 @@ noise and matched filtering. It needs only `|h(f)|^2 / S_j(f)`, so there is no
 waveform phase, no long strain buffer, no padding and no duration binning. Every
 event has the same array shapes.
 
-BAYESTAR's own injection tool `bayestar_realize_coincs` works this way *(verify)*
-and is the validation reference.
+BAYESTAR's own injection tool `bayestar_realize_coincs` works this way (confirmed
+in the audit) and is the validation reference. It places the signal with cubic
+interpolation to the nearest sample, so agreement with the exact phase ramp used
+here is approximate at the sub-sample level.
 
 ## Architecture
 
@@ -119,11 +122,13 @@ A_j(tau)  = (4 * df / sigma_j^2) * sum_band(|h|^2 / S_j * exp(2*pi*i*f*tau))
 The expected complex SNR has the form
 
 ```text
-rho_j = (horizon_j / d_L) * [F+_j * (1 + cos^2 i) / 2  -  i * Fx_j * cos i] * phase
+rho_j = (horizon_j / d_L) * [F+_j * (1 + cos^2 i) / 2  +  i * Fx_j * cos i]
 ```
 
-Copy the sign, conjugation and phase conventions from BAYESTAR's signal model and
-`bayestar_realize_coincs` rather than deriving them independently.
+This is the form in `bayestar_realize_coincs.simulate_snr`: the cross term enters
+with `+i`, and there is no coalescence-phase factor (the tool treats it as
+arbitrary). `F+` and `Fx` come from `lal.ComputeDetAMResponse`, so the
+polarization convention is LAL's.
 
 Signal and noise come from one inverse FFT per detector. With `w_f` a complex
 standard normal draw per frequency bin (unit variance per quadrature):
@@ -175,7 +180,7 @@ pixels, log_bci, log_bsn = core.toa_phoa_snr(
 | `epochs` | Per-detector first-sample time offsets from that epoch, seconds |
 | `snrs` | `(n_detectors, n_samples, 2)`: amplitude and unwrapped phase |
 | `responses` | `(n_detectors, 3, 3)` Earth-fixed detector response tensors |
-| `locations` | `(n_detectors, 3)` positions in light-seconds, centred as the wrapper does |
+| `locations` | `(n_detectors, 3)` positions in light-seconds, centred on the timing-weighted mean as the wrapper does |
 | `horizons` | `(n_detectors,)` SNR=1 distances in Mpc |
 
 - Reproduce the conditioning in `bayestar.condition` and the wrapper's network
@@ -191,19 +196,25 @@ pixels, log_bci, log_bsn = core.toa_phoa_snr(
 
 ## High-SNR behaviour (go/no-go)
 
-This is the main technical risk for ET and CE. The distance integral is rescaled
-to the event's SNR *(verify)*, but the sky sampling is not:
+This is the main technical risk for ET and CE. The distance integral is not
+rescaled to the event's SNR. It is read from a 400 x 400 lookup table built per
+call, whose amplitude range is set by the detector horizons; the peak of the
+likelihood is factored out analytically before interpolation, so the table holds a
+smooth function. Whether that table stays accurate at SNR in the hundreds is
+untested and is part of this gate. The sky sampling does not adapt to SNR either:
 
-- **Coarse first pass.** The search starts at nside 16 and refines the
-  highest-probability pixels *(verify)*. At SNR in the hundreds the timing
+- **Coarse first pass.** The search starts at nside 16 (3072 pixels) and, at each
+  of 7 levels, subdivides the 768 highest-probability pixels (confirmed). At SNR in the hundreds the timing
   precision is tens of microseconds while a coarse pixel centre is off by about a
   millisecond, so the first pass ranks pixels on far-tail likelihoods where
   autocorrelation sidelobes can mislead the refinement.
 - **SNR-series interpolation.** Log-likelihood errors scale as SNR squared times
   the interpolation error, so the sample rate that suffices at SNR 10 may not at
   SNR 300. Raising the sample rate of the crops is cheap here.
-- **Resolution floor.** The finest pixel is about 1e-3 deg^2 if the maximum is
-  nside 2048 *(verify)*, which only limits the best-localised events.
+- **Resolution floor.** The maximum is nside 2048 (confirmed), so the finest pixel
+  is about 8e-4 deg^2. Every map has 19200 pixels, and at most 3072 of them are at
+  the finest level, covering about 2.5 deg^2. This limits only the best-localised
+  events.
 
 Test: one source in ET+2CE at network SNR 10, 30, 100, 300 and 1000, many noise
 realisations each. Pass if `A90` scales as SNR^-2 and the truth falls inside
@@ -243,8 +254,8 @@ products   FITS, summary table, manifest
 cli        run / resume / summarise
 ```
 
-Dependencies: `jax`, `ripple`, `ligo.skymap`, `astropy`. PyCBC and gwmock are
-validation-only extras.
+Dependencies: `jax`, `ripplegw` (ripple's distribution name), `ligo.skymap`,
+`astropy`. PyCBC and gwmock-signal are in the `validation` extra.
 
 ## Strain-level path (optional extra)
 
@@ -279,8 +290,8 @@ package output replaces neither automatically:
 
 ## Implementation sequence
 
-0. **Pin and audit.** Fix versions of JAX, ripple and ligo.skymap. Confirm every
-   *(verify)* item, the `core.toa_phoa_snr` signature, the conditioning and
+0. **Pin and audit.** Done, see [audit.md](audit.md). Fix versions of JAX, ripple
+   and ligo.skymap. Confirm every claim about the ligo.skymap source, the `core.toa_phoa_snr` signature, the conditioning and
    centring conventions, and that no dependency sets x64 implicitly.
 1. **HLV baseline.** Implement the SNR-level simulation for one fixed source.
    Compare prepared arrays, then maps, distances and areas, against
