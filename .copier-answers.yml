@@ -9,4 +9,4 @@ github_username: binado
 project_name: injstar
 project_type: app
 publish_to_pypi: true
-python_min: '3.11'
+python_min: '3.12'
