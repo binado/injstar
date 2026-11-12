@@ -83,15 +83,16 @@ bottleneck.
 
 All three are files, so the package is reusable across projects.
 
-**Network spec** (TOML or YAML), per detector:
+**Network spec** (TOML, the detector registry schema of astrogwb), per detector:
 
-- Name, vertex latitude, longitude and height, arm azimuths. Arms need not be
-  orthogonal (ET uses 60 degrees).
-- PSD file path, with an explicit `asd` or `psd` flag.
+- Name, vertex latitude, longitude and height, arm azimuths and tilts, in
+  radians and metres. Arms need not be orthogonal (ET uses 60 degrees).
+- PSD reference (packaged curve, path or URL), with an explicit `asd` or `psd`
+  kind.
 - Geometry and PSD are independent entries: a CE noise curve does not define a CE
   site.
 
-**Population file** (HDF5 or Parquet), per event:
+**Population file** (CSV or HDF5 in gwmock-pop's layout), per event:
 
 - Event id, detector-frame masses, aligned spins, luminosity distance in Mpc,
   RA, Dec, inclination, polarization, reference phase, geocentric GPS time.
@@ -289,6 +290,13 @@ package output replaces neither automatically:
    radial and angular responses approximate the joint one.
 
 ## Implementation sequence
+
+Status: steps 2 and 4 are implemented (`injstar snr`, `run`, `resume`,
+`summarise`), ahead of the order below. Step 1 is partly covered by tests:
+geometry, antenna patterns, delays and the horizon are checked against LAL, and
+a zero-noise HLV map contains the truth, but the prepared arrays have not been
+compared with `bayestar_realize_coincs` plus `bayestar.localize`. Steps 3 and 5
+have not been run, so no localization from this package is validated yet.
 
 0. **Pin and audit.** Done, see [audit.md](audit.md). Fix versions of JAX, ripple
    and ligo.skymap. Confirm every claim about the ligo.skymap source, the `core.toa_phoa_snr` signature, the conditioning and

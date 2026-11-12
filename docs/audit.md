@@ -172,10 +172,38 @@ only that the call runs and what it returns.
 
 injstar must enable x64 itself, as the design says.
 
+## Found while implementing
+
+Checked on 2026-11-12 by the test suite, against the versions above plus
+gwmock-noise 0.23.0.
+
+- **ripplegw amplitude.** `ripplegw.waveform("IMRPhenomD").amplitude(f, params)`
+  at `d_L = 1` (Mpc) is the face-on `|h+|` of
+  `lalsimulation.SimInspiralChooseFDWaveform` at 1 Mpc: the H1 horizon computed
+  from each agrees to a relative 1e-6 (`tests/test_simulate.py`).
+- **Packaged geometry against LAL.** Vertex positions built from the geodetic
+  fields agree with `lal.cached_detector_by_prefix` to under 1 mm for H1, L1, V1
+  and K1. Response tensors differ by up to 3e-4 (H1, L1), 1e-8 (V1) and 2e-3
+  (K1), because LAL tabulates arm directions separately. BAYESTAR's own tools
+  use the LAL tensors, so a comparison with them will show this difference.
+- **Antenna patterns and delays.** The JAX projection matches
+  `lal.ComputeDetAMResponse` to 1e-7 and `lal.TimeDelayFromEarthCenter` to 1 ns
+  when given LAL's tensors and positions.
+- **gwmock-pop catalogue layout** (0.19.0): CSV is a numeric table with a header
+  line; HDF5 holds one structured dataset named `data`, with provenance in a
+  sibling `metadata` group. The distance column is `distance`.
+- **`core.toa_phoa_snr` does not cast.** `snrs` and `responses` must already be
+  float32; float64 input raises `TypeError`.
+- **Horizon sum.** injstar uses a rectangle sum so that the autocorrelation is
+  exactly 1 at zero lag on its grid, not the trapezoid rule of
+  `SignalModel.get_horizon_distance`.
+- **Runtime.** One HLV event took about 18 s in `core.toa_phoa_snr` on one
+  thread (Apple silicon, one measurement). Simulating three events took 15 ms
+  after JIT compilation.
+
 ## Not covered
 
 - gwmock-signal and PyCBC were installed but not inspected.
-- ripplegw's waveform amplitude interface and its reference distance.
 - `bayestar.localize` postprocessing was read only as far as the distance
   parameters and marginal moments.
 - Nothing was run on Linux or on Python 3.12 and 3.14; CI will be the first test.
