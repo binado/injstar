@@ -2,6 +2,10 @@
 
 Simulated sky-distance posteriors with BAYESTAR for arbitrary detector networks.
 
+The design is described in [docs/design.md](docs/design.md). The package is a
+skeleton: the command-line interface exists but its subcommands are not
+implemented yet.
+
 ## Setup
 
 [Install uv](https://docs.astral.sh/uv/getting-started/installation/) and
@@ -49,4 +53,3 @@ just check
 Configure `pypi` and `testpypi` GitHub environments with trusted publishers.
 Push a tag matching the version in `pyproject.toml`, such as `v0.1.0`, to
 publish to PyPI. Run the Release workflow manually to publish to TestPyPI.
-
