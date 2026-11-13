@@ -79,8 +79,8 @@ class RunConfig(BaseModel):
         Frequency band of the matched filter in Hz.
     sampling_frequency
         Sample rate of the SNR time series in Hz.
-    window_duration
-        Length in seconds of the periodic window the SNR series is drawn on;
+    segment_duration
+        Length in seconds of the periodic segment the SNR series is drawn on;
         the frequency resolution is its inverse. Must be long enough for the
         template autocorrelation to decay.
     crop_duration
@@ -104,7 +104,7 @@ class RunConfig(BaseModel):
     minimum_frequency: Positive = 20.0
     maximum_frequency: Positive = 1024.0
     sampling_frequency: Positive = 4096.0
-    window_duration: Positive = 8.0
+    segment_duration: Positive = 8.0
     crop_duration: Positive = 0.1
     noise: bool = True
 
@@ -124,21 +124,21 @@ class RunConfig(BaseModel):
             raise ValueError("maximum_frequency must exceed minimum_frequency")
         if self.maximum_frequency > self.sampling_frequency / 2:
             raise ValueError("maximum_frequency must not exceed sampling_frequency / 2")
-        samples = self.sampling_frequency * self.window_duration
+        samples = self.sampling_frequency * self.segment_duration
         if abs(samples - round(samples)) > 1e-9 or round(samples) % 2:
             raise ValueError(
-                "sampling_frequency * window_duration must be an even whole number of samples"
+                "sampling_frequency * segment_duration must be an even whole number of samples"
             )
-        if self.crop_duration >= self.window_duration / 2:
-            raise ValueError("crop_duration must be under half of window_duration")
+        if self.crop_duration >= self.segment_duration / 2:
+            raise ValueError("crop_duration must be under half of segment_duration")
         if self.crop_samples < 3:
             raise ValueError("crop_duration spans fewer than three samples")
         return self
 
     @property
-    def window_samples(self) -> int:
-        """Number of samples in the periodic window."""
-        return round(self.sampling_frequency * self.window_duration)
+    def segment_samples(self) -> int:
+        """Number of samples in the periodic segment."""
+        return round(self.sampling_frequency * self.segment_duration)
 
     @property
     def crop_samples(self) -> int:

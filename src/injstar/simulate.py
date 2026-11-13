@@ -161,11 +161,11 @@ class Simulator:
         One-sided PSD of each detector at ``bins * delta_f``, shape
         ``(detectors, len(bins))``; non-finite where it is undefined.
     bins
-        Indices, in the periodic window's frequency grid, of the band's bins.
+        Indices, in the periodic segment's frequency grid, of the band's bins.
     n_samples
-        Samples in the periodic window.
+        Samples in the periodic segment.
     delta_f
-        Frequency spacing of the window in Hz.
+        Frequency spacing of the segment in Hz.
     sampling_frequency
         Sample rate of the SNR series in Hz.
     crop_samples
@@ -255,8 +255,8 @@ class Simulator:
         """
         names, responses, locations = registry.arrays(config.network)
 
-        n_samples = config.window_samples
-        delta_f = 1.0 / config.window_duration
+        n_samples = config.segment_samples
+        delta_f = 1.0 / config.segment_duration
         first = int(np.ceil(config.minimum_frequency / delta_f))
         last = min(
             int(np.floor(config.maximum_frequency / delta_f)), n_samples // 2 - 1
@@ -349,7 +349,7 @@ class Simulator:
             0.5 * (1 + cos_inclination**2) * plus + 1j * cos_inclination * cross
         )
 
-        # The geocentric time sits on sample n // 2 of the periodic window.
+        # The geocentric time sits on sample n // 2 of the periodic segment.
         peak_time = (n // 2) / rate + delay
         phase = -2 * jnp.pi * frequencies * peak_time[:, None]
         spectrum = (

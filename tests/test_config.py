@@ -14,7 +14,7 @@ def test_paths_resolve_against_the_config_file(config_file: Path) -> None:
     assert config.population == config_file.parent / "population.csv"
     assert config.output_dir == config_file.parent / "out"
     assert config.network == ("H1", "L1", "V1")
-    assert config.window_samples == 16384
+    assert config.segment_samples == 16384
     assert config.crop_samples % 2 == 1
 
 
@@ -44,7 +44,7 @@ def test_toml_round_trip(config_file: Path, tmp_path: Path) -> None:
             {"minimum_frequency": 2000.0},
             "maximum_frequency must exceed minimum_frequency",
         ),
-        ({"window_duration": 4.0001}, "whole number of samples"),
+        ({"segment_duration": 4.0001}, "whole number of samples"),
         ({"crop_duration": 3.0}, "under half"),
         ({"prior": {"max_distance": 10.0, "min_distance": 20.0}}, "max_distance"),
         (
