@@ -12,10 +12,10 @@ MODULES = [
     "detector",
     "detector.network",
     "detector.projection",
+    "detector.psd",
     "pipeline",
     "population",
     "products",
-    "psd",
     "runtime",
     "simulate",
 ]

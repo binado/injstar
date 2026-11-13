@@ -23,7 +23,7 @@ from gwmock_noise.gaussian.psd import resolve_bundled_psd_preset
 from gwmock_noise.spectral import interpolate_real_spectral_series, load_spectral_series
 from numpy.typing import ArrayLike, NDArray
 
-NOISE_CURVES_BASE_DIR = Path(__file__).parent / "data" / "noise_curves"
+NOISE_CURVES_BASE_DIR = Path(__file__).parent.parent / "data" / "noise_curves"
 
 PsdKind = Literal["psd", "asd"]
 
