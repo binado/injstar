@@ -307,8 +307,8 @@ def map_statistics(
     macOS arm64 wheel of ligo.skymap 2.5.4, in a zero-noise ET+2CE test (one
     36+29 binary black hole, 16384 Hz), such pixels held 0% of the sky
     probability at network SNR 100, 1% at 300, 8% at 400, 24% at 500 and 52% at
-    1000, including the peak pixel. A local clang build of the same source did
-    not fail, so this depends on the build (see docs/audit.md).
+    1000, including the peak pixel. Local builds of the same source did not
+    fail, so this is specific to that wheel (see docs/audit.md).
 
     The distance quantiles, ``distmean`` and ``diststd`` use only the pixels
     with a valid distance layer, with their probabilities renormalised.

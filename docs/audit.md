@@ -223,19 +223,27 @@ gwmock-noise 0.23.0.
   24% at 500 and 52% at 1000, where the peak pixel fails; a quarter of all
   pixels fail at every order. The sky area is unaffected and scales as SNR^-2
   (A90 x SNR^2 is 12700 at SNR 100 and 14100 at 1000).
-  **The failure is a property of that build, not of the algorithm.** The same
-  v2.5.4 source built locally with Apple clang (-O3) left 33 failed pixels at
-  SNR 500, none at SNR 1000, and no probability in them; at SNR 1000 its
-  distance quantiles were 670 / 718 / 793 Mpc for a truth of 712.5 Mpc
-  (mean 724, std 37), with the same sky map. Ruled out, each by a local clang
-  build: the lookup-table size (identical results at 400 and 1600; the size is a
-  compile-time constant, `default_log_radial_integrator_size`), OpenMP, fused
-  multiply-add contraction (`-ffp-contract=fast`) and heap against stack
-  allocation of the table. Varying `max_distance`, `min_distance` and
-  `rescale_loglikelihood` in the wheel did not remove it. What differs in the
-  wheel is not identified (GCC against clang is the remaining candidate; GCC was
-  not available to test). Linux wheels are also GCC builds and were not
-  tested, so the failure may occur there too.
+  **The failure is a property of that wheel, not of the algorithm or source.**
+  The PyPI sdist's `src/`, `cextern/` and `setup.py` are identical to git tag
+  v2.5.4. The same source built locally left 33 failed pixels at SNR 500, none at
+  SNR 1000, and no probability in them; with Apple clang -O3 the SNR 1000
+  distance quantiles were 670 / 718 / 793 Mpc for a truth of 712.5 Mpc (mean 724,
+  std 37), with the same sky map. Each of these local builds reproduced that
+  clean result, so none is the cause: clang -O3; clang with OpenMP
+  (Homebrew libomp); clang with `-ffp-contract=fast`; GCC 16.2 -O3 with libgomp;
+  GCC 16.2 with the flags the project's CI uses for its wheels
+  (`-Ofast -fno-finite-math-only -flto`, `.gitlab-ci.yml`); a lookup table of
+  400 or 1600 per side (the size is a compile-time constant,
+  `default_log_radial_integrator_size`); heap against stack allocation of the
+  table. Varying `max_distance`, `min_distance` and `rescale_loglikelihood` in the
+  wheel did not remove the failures. What differs in the wheel is not
+  identified: it is built on MacPorts with GCC 14, bundles its own `libchealpix`
+  and `libgomp`, and runs on the Python it was installed into. Linux wheels
+  (x86_64 built with Intel icc, aarch64 with `-Ofast`) were not tested.
+  Separately, a GCC build crashes (bus error in
+  `bayestar_sky_map_toa_phoa_snr_pixel`) on ET+2CE at 16384 Hz unless
+  `OMP_STACKSIZE` is raised, because the function keeps arrays of
+  `nsamples`-dependent size on the stack; the wheel did not crash.
   injstar excludes failed pixels from the distance statistics and reports their
   probability as `distance_lost_prob`; see `products.map_statistics`. Excluding
   them from the wheel's SNR 1000 map gave quantiles of 579 / 712 / 832 Mpc, wider

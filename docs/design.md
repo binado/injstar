@@ -222,8 +222,9 @@ scales as SNR^-2 up to 1000, and the SNR-series sample rate must be raised to
 16384 Hz for the sky position to be unbiased there. The PyPI wheel of
 ligo.skymap 2.5.4 (macOS arm64) fails to evaluate the per-pixel distance moments
 for part of the sky probability from about SNR 400 (8%), reaching 52% at 1000.
-A clang build of the same source does not, and the table size is not the cause,
-so this is a build-specific defect, not a limit of BAYESTAR. injstar excludes the
+Local builds of the same source (clang and GCC, with and without the CI's
+fast-math flags) do not, and the table size is not the cause, so this is specific
+to that wheel, not a limit of BAYESTAR; why is not yet known. injstar excludes the
 failed pixels and reports `distance_lost_prob`, so affected events are visible.
 Still to do: check the Linux wheels, and measure the share of sources above
 SNR 400 in a realistic population.
