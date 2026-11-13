@@ -213,22 +213,33 @@ gwmock-noise 0.23.0.
     interpolated phase, so this is cosmetic.
   - Not covered: the cubic interpolation of arrival times in
     `bayestar_realize_coincs`, which injstar does not do, and non-zero noise.
-- **High-SNR distance failure** (zero-noise ET+2CE probe, one 36+29 BBH,
-  `ligo.skymap` 2.5.4). BAYESTAR computes each pixel's distance variance as
-  `exp(v2 - v0) - exp(v1 - v0)**2` from three log-integrals
-  (`src/bayestar_sky_map.c`, lines 1083-1094) and, when it is negative, writes
-  `DISTMU = inf`, `DISTSIGMA = 1`, `DISTNORM = 0`. Sky probability in such
-  pixels at 16384 Hz: 0% at network SNR 100, 1% at 300, 8% at 400, 24% at 500,
-  52% at 1000, where the peak pixel fails and a quarter of all pixels fail at
-  every order. At SNR 1000 the sky area still scales as SNR^-2 (A90 x SNR^2 is
-  12700 at SNR 100 and 14100 at 1000). The cause is probably numerical
-  precision (the 400 x 400 table is a compile-time constant,
-  `default_log_radial_integrator_size`, with no runtime parameter, and `p` and
-  `b` are float32), not shown directly. Varying `max_distance`, `min_distance`
-  and `rescale_loglikelihood` did not remove it. injstar excludes failed pixels
-  from the distance statistics and reports their probability as
-  `distance_lost_prob`; see `products.map_statistics`. After exclusion the
-  SNR 1000 quantiles were 579 / 712 / 832 Mpc for a truth of 712.5 Mpc.
+- **High-SNR distance failure in the PyPI wheel** (zero-noise ET+2CE probe, one
+  36+29 BBH, 16384 Hz, `ligo.skymap` 2.5.4). BAYESTAR computes each pixel's
+  distance variance as `exp(v2 - v0) - exp(v1 - v0)**2` from three
+  log-integrals (`src/bayestar_sky_map.c`, lines 1083-1094) and, when it is
+  negative, writes `DISTMU = inf`, `DISTSIGMA = 1`, `DISTNORM = 0`. With the
+  macOS arm64 wheel from PyPI (built with GCC and GNU OpenMP) the sky
+  probability in such pixels was 0% at network SNR 100, 1% at 300, 8% at 400,
+  24% at 500 and 52% at 1000, where the peak pixel fails; a quarter of all
+  pixels fail at every order. The sky area is unaffected and scales as SNR^-2
+  (A90 x SNR^2 is 12700 at SNR 100 and 14100 at 1000).
+  **The failure is a property of that build, not of the algorithm.** The same
+  v2.5.4 source built locally with Apple clang (-O3) left 33 failed pixels at
+  SNR 500, none at SNR 1000, and no probability in them; at SNR 1000 its
+  distance quantiles were 670 / 718 / 793 Mpc for a truth of 712.5 Mpc
+  (mean 724, std 37), with the same sky map. Ruled out, each by a local clang
+  build: the lookup-table size (identical results at 400 and 1600; the size is a
+  compile-time constant, `default_log_radial_integrator_size`), OpenMP, fused
+  multiply-add contraction (`-ffp-contract=fast`) and heap against stack
+  allocation of the table. Varying `max_distance`, `min_distance` and
+  `rescale_loglikelihood` in the wheel did not remove it. What differs in the
+  wheel is not identified (GCC against clang is the remaining candidate; GCC was
+  not available to test). Linux wheels are also GCC builds and were not
+  tested, so the failure may occur there too.
+  injstar excludes failed pixels from the distance statistics and reports their
+  probability as `distance_lost_prob`; see `products.map_statistics`. Excluding
+  them from the wheel's SNR 1000 map gave quantiles of 579 / 712 / 832 Mpc, wider
+  than the clang map's.
   At 4096 Hz the sky position is biased by 0.04 deg at every SNR (16384 Hz: 0.006
   deg), an interpolation effect of the SNR series.
 - **Runtime.** One HLV event took about 18 s in `core.toa_phoa_snr` on one
