@@ -1,8 +1,8 @@
 """Run products.
 
 Reads and writes the tables of a run directory (``injections.h5`` and
-``summary.h5``, one row per injection, non-detections included), the run
-manifest, and the per-map statistics that make up the summary.
+``summary.h5``, one row per injection, non-detections included) and computes
+the per-map statistics that make up the summary.
 
 A table is an HDF5 file with one dataset per column, written beside its
 destination and renamed onto it.
@@ -10,16 +10,13 @@ destination and renamed onto it.
 Nothing here imports JAX.
 """
 
-import hashlib
 import json
 import os
 import tempfile
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from importlib.metadata import version
 from pathlib import Path
-from typing import Any
 
 import h5py
 import numpy as np
@@ -29,53 +26,13 @@ from injstar import __version__
 
 INJECTIONS_FILE = "injections.h5"
 SUMMARY_FILE = "summary.h5"
-MANIFEST_FILE = "manifest.json"
-CONFIG_FILE = "config.toml"
-DETECTORS_FILE = "detectors.toml"
-
-#: Distributions whose versions the manifest records.
-RECORDED_DEPENDENCIES = (
-    "jax",
-    "ripplegw",
-    "ligo.skymap",
-    "lalsuite",
-    "astropy",
-    "numpy",
-    "gwmock-noise",
-)
+CONFIG_FILE = "config.json"
 
 #: Credible levels of the sky areas and distance quantiles in the summary.
 CONTOUR_LEVELS = (0.5, 0.9)
 DISTANCE_QUANTILES = (0.05, 0.5, 0.95)
 
 Columns = dict[str, NDArray]
-
-
-def file_sha256(path: Path) -> str:
-    """Hex SHA-256 of a file's contents.
-
-    Parameters
-    ----------
-    path
-        File to hash.
-    """
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def fingerprint(record: Mapping[str, Any]) -> str:
-    """Hex SHA-256 of a JSON-serializable record, independent of key order.
-
-    Parameters
-    ----------
-    record
-        What defines a run's results.
-    """
-    encoded = json.dumps(record, sort_keys=True, default=str).encode()
-    return hashlib.sha256(encoded).hexdigest()
 
 
 @contextmanager
@@ -166,44 +123,6 @@ def read_table(path: Path) -> tuple[Columns, dict[str, str]]:
                 values = np.char.decode(values, "utf-8")
             columns[name] = values
     return columns, attrs
-
-
-def write_manifest(output_dir: Path, record: Mapping[str, Any]) -> Path:
-    """Write ``manifest.json`` with ``record`` and the software versions.
-
-    Parameters
-    ----------
-    output_dir
-        Run directory.
-    record
-        Inputs of the run; its :func:`fingerprint` is stored alongside.
-    """
-    manifest = {
-        "fingerprint": fingerprint(record),
-        "created": datetime.now(UTC).isoformat(),
-        "versions": {
-            "injstar": __version__,
-            **{name: version(name) for name in RECORDED_DEPENDENCIES},
-        },
-        **record,
-    }
-    target = Path(output_dir) / MANIFEST_FILE
-    partial = target.with_name(f".{target.name}.partial")
-    partial.write_text(json.dumps(manifest, indent=2, default=str) + "\n")
-    os.replace(partial, target)
-    return target
-
-
-def read_manifest(output_dir: Path) -> dict[str, Any] | None:
-    """The manifest of a run directory, or ``None`` if it has none.
-
-    Parameters
-    ----------
-    output_dir
-        Run directory.
-    """
-    path = Path(output_dir) / MANIFEST_FILE
-    return json.loads(path.read_text()) if path.is_file() else None
 
 
 def skymap_path(output_dir: Path, event_id: int) -> Path:
@@ -377,7 +296,7 @@ def build_summary(output_dir: Path) -> Path:
         The written ``summary.h5``.
     """
     output_dir = Path(output_dir)
-    columns, attrs = read_table(output_dir / INJECTIONS_FILE)
+    columns, _ = read_table(output_dir / INJECTIONS_FILE)
     count = len(columns["event_id"])
     statistics = {name: np.full(count, np.nan) for name in statistic_names()}
     paths = np.full(count, "", dtype=object)
@@ -397,6 +316,4 @@ def build_summary(output_dir: Path) -> Path:
     columns["localized"] = paths != ""
     columns.update(statistics)
     columns["skymap"] = paths.astype(str)
-    return write_table(
-        output_dir / SUMMARY_FILE, columns, fingerprint=attrs.get("fingerprint", "")
-    )
+    return write_table(output_dir / SUMMARY_FILE, columns)

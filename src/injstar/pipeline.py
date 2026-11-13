@@ -6,14 +6,18 @@ Simulation is deterministic per event, so :func:`run` re-draws the SNR series
 of the events it localizes instead of storing them, and an interrupted run is
 finished by calling it again with ``resume=True``.
 
-A run directory records the fingerprint of what defines its results (config,
-detectors, population and PSD file contents). A directory is only reused when
-the fingerprint matches.
+A run directory holds ``config.json``, the :class:`~injstar.config.RunConfig`
+that produced it. A directory is only reused when that config matches the
+requested one, ignoring the fields that change how a run executes but not what
+it produces. The population and PSD files are not hashed, so editing them in
+place is not detected.
 """
 
+import json
 import logging
 import multiprocessing
 import shutil
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from functools import partial
@@ -23,9 +27,8 @@ from typing import Any
 import numpy as np
 
 from injstar import products
-from injstar.config import RunConfig, dump_toml, load_run_config
+from injstar.config import RunConfig
 from injstar.detector.network import DetectorRegistry, load_detector_config
-from injstar.detector.psd import resolve_psd_path
 from injstar.population import Population, read_population, simulation_events
 from injstar.runtime import configure_runtime, set_cpu_threads
 
@@ -33,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 #: Config fields that change how a run executes but not what it produces.
 _EXECUTION_FIELDS = frozenset(
-    {"output_dir", "detector_config", "workers", "threads_per_worker", "batch_size"}
+    {"output_dir", "workers", "threads_per_worker", "batch_size"}
 )
 
 
@@ -53,19 +56,11 @@ class Inputs:
         Registry restricted to the configured network.
     population
         Canonical population columns.
-    record
-        What defines the run's results, as recorded in the manifest.
     """
 
     config: RunConfig
     registry: DetectorRegistry
     population: Population
-    record: dict[str, Any]
-
-    @property
-    def fingerprint(self) -> str:
-        """Fingerprint of :attr:`record`."""
-        return products.fingerprint(self.record)
 
 
 def load_inputs(config: RunConfig) -> Inputs:
@@ -80,48 +75,35 @@ def load_inputs(config: RunConfig) -> Inputs:
     population = read_population(
         config.population, cosmology=config.population_cosmology
     )
-    psd_hashes = {}
-    for name, detector in registry.detectors.items():
-        resolved = resolve_psd_path(detector.psd_reference)
-        psd_hashes[name] = (
-            products.file_sha256(resolved) if isinstance(resolved, Path) else resolved
-        )
-    detectors = registry.model_dump(mode="json")["detectors"]
-    for detector in detectors.values():
-        # The curve's content is hashed below; how it was referred to is not
-        # part of the run's identity.
-        del detector["psd_reference"], detector["label"]
-    record = {
-        "config": config.model_dump(
-            mode="json", exclude=set(_EXECUTION_FIELDS) | {"network"}
-        ),
-        "network": list(registry.members("selected")),
-        "detectors": detectors,
-        "population_sha256": products.file_sha256(config.population),
-        "psd_sha256": psd_hashes,
-    }
-    return Inputs(config, registry, population, record)
+    return Inputs(config, registry, population)
 
 
-def _prepare_directory(inputs: Inputs, *, overwrite: bool) -> bool:
+def _results_key(config: Mapping[str, Any]) -> dict[str, Any]:
+    """The part of a dumped config that defines a run's results."""
+    return {k: v for k, v in config.items() if k not in _EXECUTION_FIELDS}
+
+
+def _prepare_directory(config: RunConfig, *, overwrite: bool) -> bool:
     """Make the output directory usable; return whether it holds this run."""
-    output_dir = inputs.config.output_dir
-    manifest = products.read_manifest(output_dir)
+    output_dir = config.output_dir
+    snapshot = output_dir / products.CONFIG_FILE
     occupied = output_dir.exists() and any(output_dir.iterdir())
-    if manifest is not None and manifest.get("fingerprint") == inputs.fingerprint:
+    recorded = json.loads(snapshot.read_text()) if snapshot.is_file() else None
+    requested = config.model_dump(mode="json")
+    if recorded is not None and _results_key(recorded) == _results_key(requested):
         if not overwrite:
             return True
     elif occupied and not overwrite:
         reason = (
-            "holds a run with different inputs"
-            if manifest is not None
+            "holds a run with a different config"
+            if recorded is not None
             else "is not empty and is not an injstar run"
         )
         raise RunDirectoryError(
             f"{output_dir} {reason}; pass --overwrite to replace it"
         )
     if occupied:
-        if manifest is None:
+        if recorded is None:
             raise RunDirectoryError(
                 f"{output_dir} is not an injstar run directory; refusing to delete it"
             )
@@ -130,26 +112,11 @@ def _prepare_directory(inputs: Inputs, *, overwrite: bool) -> bool:
     return False
 
 
-def _write_inputs(inputs: Inputs) -> None:
-    """Snapshot the config and detectors so the directory stands alone."""
-    config, output_dir = inputs.config, inputs.config.output_dir
-    names = inputs.registry.members("selected")
-    detectors = inputs.registry.model_dump(mode="json")["detectors"]
-    for detector in detectors.values():
-        resolved = resolve_psd_path(detector["psd_reference"])
-        if isinstance(resolved, Path):
-            detector["psd_reference"] = str(resolved.resolve())
-    (output_dir / products.DETECTORS_FILE).write_text(
-        dump_toml({"detectors": detectors})
+def _write_config(config: RunConfig) -> None:
+    """Record the config in the run directory."""
+    (config.output_dir / products.CONFIG_FILE).write_text(
+        config.model_dump_json(indent=2) + "\n"
     )
-    snapshot = config.model_copy(
-        update={
-            "network": names,
-            "detector_config": (output_dir / products.DETECTORS_FILE,),
-        }
-    )
-    (output_dir / products.CONFIG_FILE).write_text(snapshot.to_toml())
-    products.write_manifest(output_dir, inputs.record)
 
 
 def _simulator(inputs: Inputs):  # noqa: ANN202 - simulate imports JAX
@@ -190,7 +157,7 @@ def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
     """
     inputs = load_inputs(config)
     target = config.output_dir / products.INJECTIONS_FILE
-    if _prepare_directory(inputs, overwrite=overwrite) and target.is_file():
+    if _prepare_directory(config, overwrite=overwrite) and target.is_file():
         logger.info("reusing %s", target)
         return target
 
@@ -204,8 +171,8 @@ def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
     columns["network_snr"] = result.network_snr
     columns["detected"] = result.detected
 
-    _write_inputs(inputs)
-    products.write_table(target, columns, fingerprint=inputs.fingerprint)
+    _write_config(config)
+    products.write_table(target, columns)
     logger.info(
         "%d of %d injections detected", int(result.detected.sum()), len(result.detected)
     )
@@ -327,19 +294,17 @@ def resume(output_dir: Path, *, workers: int | None = None) -> Path:
     Raises
     ------
     RunDirectoryError
-        If the directory is not a run, or its inputs changed since it was
-        written.
+        If the directory is not a run.
     """
     output_dir = Path(output_dir).resolve()
     snapshot = output_dir / products.CONFIG_FILE
-    manifest = products.read_manifest(output_dir)
-    if manifest is None or not snapshot.is_file():
+    if not snapshot.is_file():
         raise RunDirectoryError(f"{output_dir} is not an injstar run directory")
-    config = load_run_config(snapshot, output_dir=output_dir, workers=workers)
-    if load_inputs(config).fingerprint != manifest["fingerprint"]:
-        raise RunDirectoryError(
-            f"the inputs of {output_dir} changed since the run was started"
-        )
+    data = json.loads(snapshot.read_text())
+    data["output_dir"] = str(output_dir)
+    if workers is not None:
+        data["workers"] = workers
+    config = RunConfig.model_validate(data)
     return run(config, resume=True)
 
 

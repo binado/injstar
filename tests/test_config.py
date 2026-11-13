@@ -28,12 +28,10 @@ def test_overrides_replace_file_values(config_file: Path, tmp_path: Path) -> Non
     assert config.workers == 1
 
 
-def test_toml_round_trip(config_file: Path, tmp_path: Path) -> None:
+def test_json_round_trip(config_file: Path) -> None:
     config = load_run_config(config_file)
-    copy = tmp_path / "copy.toml"
-    copy.write_text(config.to_toml())
 
-    assert load_run_config(copy) == config
+    assert RunConfig.model_validate_json(config.model_dump_json()) == config
 
 
 @pytest.mark.parametrize(

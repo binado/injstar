@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 from injstar import products
 from injstar.cli import app
+from injstar.config import RunConfig, load_run_config
 
 runner = CliRunner()
 
@@ -50,15 +51,21 @@ def test_snr_writes_injections_and_no_maps(config_file: Path) -> None:
     assert "2 of 3 injections detected" in output
     out = config_file.parent / "out"
     assert sorted(path.name for path in out.iterdir()) == [
-        "config.toml", "detectors.toml", "injections.h5", "manifest.json",
+        "config.json", "injections.h5",
     ]  # fmt: skip
-    columns, attrs = products.read_table(out / "injections.h5")
-    manifest = products.read_manifest(out)
-    assert manifest is not None
-    assert attrs["fingerprint"] == manifest["fingerprint"]
+    columns, _ = products.read_table(out / "injections.h5")
     for name in ("expected_snr_H1", "observed_snr_V1", "horizon_L1", "network_snr"):
         assert columns[name].shape == (3,)
     np.testing.assert_array_equal(columns["detected"], [True, False, True])
+
+
+def test_snr_records_the_config_it_ran(config_file: Path) -> None:
+    invoke("snr", config_file)
+
+    recorded = RunConfig.model_validate_json(
+        (config_file.parent / "out" / "config.json").read_text()
+    )
+    assert recorded == load_run_config(config_file)
 
 
 def test_snr_ignores_snr_columns_in_the_population(
@@ -91,7 +98,7 @@ def test_snr_reuses_a_matching_directory_and_refuses_another(
 
     code, output = invoke("snr", config_file, "--seed", 5)
     assert code == 1
-    assert "different inputs" in output
+    assert "different config" in output
 
     assert invoke("snr", config_file, "--seed", 5, "--overwrite")[0] == 0
     assert target.stat().st_mtime_ns != written

@@ -16,7 +16,6 @@ Example::
 """
 
 import tomllib
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Self
 
@@ -144,55 +143,6 @@ class RunConfig(BaseModel):
     def crop_samples(self) -> int:
         """Odd number of samples in the cropped SNR series."""
         return 2 * int(self.crop_duration * self.sampling_frequency / 2) + 1
-
-    def to_toml(self) -> str:
-        """Serialize to TOML that :func:`load_run_config` reads back."""
-        return dump_toml(self.model_dump(mode="json"))
-
-
-def _format_value(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int | float):
-        return repr(value)
-    if isinstance(value, str):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
-    if isinstance(value, list | tuple):
-        return "[" + ", ".join(_format_value(item) for item in value) + "]"
-    raise TypeError(f"cannot write {type(value).__name__} to TOML")
-
-
-def _format_key(key: str) -> str:
-    bare = key.replace("-", "").replace("_", "")
-    return key if bare.isalnum() and bare.isascii() else _format_value(key)
-
-
-def dump_toml(data: Mapping[str, Any], prefix: str = "") -> str:
-    """Write nested mappings of scalars and lists as TOML.
-
-    Parameters
-    ----------
-    data
-        Mapping to write; ``None`` values are skipped.
-    prefix
-        Dotted name of the table ``data`` belongs to.
-    """
-    lines = [
-        f"{_format_key(key)} = {_format_value(value)}"
-        for key, value in data.items()
-        if value is not None and not isinstance(value, Mapping)
-    ]
-    if prefix and lines:
-        lines.insert(0, f"[{prefix}]")
-    blocks = ["\n".join(lines)] if lines else []
-    for key, value in data.items():
-        if isinstance(value, Mapping):
-            name = f"{prefix}.{_format_key(key)}" if prefix else _format_key(key)
-            block = dump_toml(value, name).rstrip("\n")
-            if block:
-                blocks.append(block)
-    return "\n\n".join(blocks) + "\n"
 
 
 def load_run_config(path: Path, **overrides: Any) -> RunConfig:
