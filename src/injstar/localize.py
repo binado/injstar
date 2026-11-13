@@ -28,13 +28,8 @@ from numpy.typing import NDArray
 
 from injstar import __version__
 from injstar.config import PriorConfig
+from injstar.constants import ARRIVAL_TIME_MARGIN_S, SPEED_OF_LIGHT_M_S
 from injstar.products import skymap_path
-
-SPEED_OF_LIGHT_M_S = 299792458.0
-
-#: Margin added to the light-travel time from the network centre, as in
-#: ``ligo.skymap.bayestar.condition``.
-ARRIVAL_TIME_MARGIN_S = 0.005
 
 
 @dataclass(frozen=True)

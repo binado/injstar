@@ -2,8 +2,6 @@
 
 Call :func:`configure_runtime` before importing libraries that initialize CPU
 thread pools and before JAX initializes its backend.
-
-Ported from ``astrogwb.runtime`` (astrogwb 0.7.0).
 """
 
 import os

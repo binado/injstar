@@ -22,8 +22,7 @@ merged on top and uses the same tables::
     [networks]
     mine = ["X1", "H1", "L1"]
 
-Ported from ``astrogwb.detector.geometry`` and ``astrogwb.detector.config``
-(astrogwb 0.7.0), so one detector file works in both. Nothing here imports JAX.
+Nothing here imports JAX.
 """
 
 import math
@@ -38,12 +37,13 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.dataclasses import dataclass
 
+from injstar.constants import WGS84_FLATTENING, WGS84_SEMI_MAJOR_AXIS_M
 from injstar.psd import PsdKind, Sensitivity, resolve_psd_path
 
 #: The packaged detector geometry and sensitivity tables, the first layers of
 #: every merge.
 DETECTOR_DEFAULT_PATHS = tuple(
-    Path(__file__).parent / "data" / filename
+    Path(__file__).parent.parent / "data" / filename
     for filename in ("geometry.toml", "sensitivity.toml")
 )
 
@@ -66,8 +66,10 @@ class DetectorGeometry:
     def location(self) -> NDArray[np.float64]:
         """Earth-fixed WGS-84 vertex location in metres, read-only."""
         lat, lon = self.latitude_rad, self.longitude_rad
-        eccentricity_squared = (1 / 298.257223563) * (2 - 1 / 298.257223563)
-        radius = 6378137.0 / math.sqrt(1 - eccentricity_squared * math.sin(lat) ** 2)
+        eccentricity_squared = WGS84_FLATTENING * (2 - WGS84_FLATTENING)
+        radius = WGS84_SEMI_MAJOR_AXIS_M / math.sqrt(
+            1 - eccentricity_squared * math.sin(lat) ** 2
+        )
         result = np.array(
             [
                 (radius + self.elevation_m) * math.cos(lat) * math.cos(lon),

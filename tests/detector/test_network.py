@@ -5,7 +5,11 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from injstar.network import DetectorGeometry, DetectorRegistry, load_detector_config
+from injstar.detector.network import (
+    DetectorGeometry,
+    DetectorRegistry,
+    load_detector_config,
+)
 from injstar.psd import NOISE_CURVES_BASE_DIR
 
 

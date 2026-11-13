@@ -5,7 +5,7 @@ import lalsimulation
 import numpy as np
 import pytest
 
-from injstar.network import DetectorRegistry
+from injstar.detector.network import DetectorRegistry
 from injstar.population import read_population, simulation_events
 from injstar.simulate import Simulator, greenwich_sidereal_time
 

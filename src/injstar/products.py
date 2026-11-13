@@ -5,8 +5,7 @@ Reads and writes the tables of a run directory (``injections.h5`` and
 manifest, and the per-map statistics that make up the summary.
 
 A table is an HDF5 file with one dataset per column, written beside its
-destination and renamed onto it. The atomic write is ported from
-``astrogwb.utils.io`` (astrogwb 0.7.0).
+destination and renamed onto it.
 
 Design: "Outputs" in docs/design.md. Nothing here imports JAX.
 """

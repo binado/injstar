@@ -1,18 +1,29 @@
-"""SNR-level simulation.
+r"""SNR-level simulation.
 
 Batched JAX code that draws each detector's matched-filter SNR time series
 directly: expected complex SNR, whitened template autocorrelation and correlated
 Gaussian noise from one inverse FFT per detector, plus detection flags.
 
-For detector ``j``, with ``|h(f)|`` the face-on amplitude at 1 Mpc and ``S_j``
-the one-sided PSD::
+For detector :math:`j`, with :math:`|h(f)|` the face-on amplitude at 1 Mpc and
+:math:`S_j` the one-sided PSD:
 
-    sigma_j^2 = 4 df sum(|h|^2 / S_j)            horizon_j = sigma_j  [Mpc]
-    rho_j     = horizon_j / d_L * (F+ (1 + cos^2 i) / 2 + i Fx cos i)
-    z_j(t)    = rho_j A_j(t - t_j) + n_j(t),     <n n*> = 2 A_j
+.. math::
 
-The rectangle sum is used for ``sigma_j`` so that ``A_j(0) = 1`` exactly on the
-grid; ligo.skymap's own horizon uses a trapezoid rule, which differs only by
+    \sigma_j^2 = 4 \, \Delta f \sum_f \frac{|h(f)|^2}{S_j(f)}, \qquad
+    \mathrm{horizon}_j = \sigma_j \ [\mathrm{Mpc}]
+
+.. math::
+
+    \rho_j = \frac{\mathrm{horizon}_j}{d_L}
+    \left[ F_+ \frac{1 + \cos^2 \iota}{2} + i \, F_\times \cos \iota \right]
+
+.. math::
+
+    z_j(t) = \rho_j \, A_j(t - t_j) + n_j(t), \qquad
+    \langle n \, n^* \rangle = 2 A_j
+
+The rectangle sum is used for :math:`\sigma_j` so that :math:`A_j(0) = 1` exactly
+on the grid; ligo.skymap's own horizon uses a trapezoid rule, which differs only by
 half of the two band-edge bins.
 
 Times are offsets from each event's geocentric coalescence time. JAX must run
@@ -31,9 +42,9 @@ import numpy as np
 import ripplegw
 from numpy.typing import NDArray
 
-from injstar import projection
 from injstar.config import RunConfig
-from injstar.network import DetectorRegistry
+from injstar.detector import projection
+from injstar.detector.network import DetectorRegistry
 
 #: Per-event inputs of the simulation, each an array over events.
 EVENT_FIELDS = (
@@ -48,6 +59,17 @@ EVENT_FIELDS = (
     "polarization_angle",
     "inclination",
     "gmst",
+)
+
+#: Per-event outputs shared by :meth:`Simulator.snr` and :meth:`Simulator.series`,
+#: matching the fields of :class:`SnrResult`.
+SCALAR_FIELDS = (
+    "expected_snr",
+    "observed_snr",
+    "horizon",
+    "bandwidth",
+    "network_snr",
+    "detected",
 )
 
 
@@ -103,6 +125,12 @@ class SeriesResult:
 
 def greenwich_sidereal_time(gps_times: NDArray[np.float64]) -> NDArray[np.float64]:
     """Greenwich mean sidereal time in radians at each GPS time.
+
+    LAL's routine takes one :class:`lal.LIGOTimeGPS` at a time, hence the loop.
+    It is used rather than the vectorised :mod:`astropy.time` sidereal time
+    because BAYESTAR computes GMST with LAL, and the two differ by ~1e-5 rad.
+    The result is not reduced modulo :math:`2\\pi`, which is harmless as it only
+    enters trigonometric functions.
 
     Parameters
     ----------
@@ -304,15 +332,6 @@ class Simulator:
                 chunks[name].append(np.asarray(output[name])[:valid])
         return {name: np.concatenate(parts) for name, parts in chunks.items()}
 
-    _SCALARS = (
-        "expected_snr",
-        "observed_snr",
-        "horizon",
-        "bandwidth",
-        "network_snr",
-        "detected",
-    )
-
     def snr(self, events: Mapping[str, NDArray]) -> SnrResult:
         """Expected and observed SNRs and detection flags.
 
@@ -323,7 +342,7 @@ class Simulator:
             are detector-frame in solar masses, distance in Mpc, angles in
             radians; ``event_id`` is a non-negative integer.
         """
-        return SnrResult(**self._run(events, self._SCALARS))
+        return SnrResult(**self._run(events, SCALAR_FIELDS))
 
     def series(self, events: Mapping[str, NDArray]) -> SeriesResult:
         """Cropped SNR time series, with the scalars of :meth:`snr`.
@@ -333,6 +352,6 @@ class Simulator:
         events
             As for :meth:`snr`.
         """
-        output = self._run(events, (*self._SCALARS, "series", "epochs"))
+        output = self._run(events, (*SCALAR_FIELDS, "series", "epochs"))
         series, epochs = output.pop("series"), output.pop("epochs")
         return SeriesResult(SnrResult(**output), series, epochs)

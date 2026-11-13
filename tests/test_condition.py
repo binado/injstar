@@ -15,8 +15,8 @@ from ligo.skymap import bayestar
 from ligo.skymap.io import events
 from numpy.typing import NDArray
 
+from injstar.detector.network import DetectorRegistry
 from injstar.localize import Event, Network, Packed, pack
-from injstar.network import DetectorRegistry
 
 PSD_DELTA_F = 0.25
 PSD_F_MAX = 2048.0

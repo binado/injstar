@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from injstar.config import RunConfig
+from injstar.detector.network import DetectorRegistry, load_detector_config
 from injstar.localize import Event, Network
-from injstar.network import DetectorRegistry, load_detector_config
 from injstar.population import read_population, simulation_events
 from injstar.runtime import configure_runtime
 from injstar.simulate import Simulator, greenwich_sidereal_time

@@ -10,8 +10,7 @@ infinite contribution to an inverse-variance sum. Calling a
 :class:`Sensitivity` maps them to ``inf`` instead, so out-of-band bins
 contribute nothing.
 
-Ported from ``astrogwb.detector.psd`` and ``astrogwb.detector.sensitivity``
-(astrogwb 0.7.0). Nothing here imports JAX.
+Nothing here imports JAX.
 """
 
 from dataclasses import dataclass, field

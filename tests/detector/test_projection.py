@@ -2,7 +2,7 @@ import lal
 import numpy as np
 import pytest
 
-from injstar import projection
+from injstar.detector import projection
 
 
 @pytest.mark.parametrize("name", ["H1", "L1", "V1"])

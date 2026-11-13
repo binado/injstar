@@ -3,15 +3,13 @@
 Coordinates and sidereal angle must refer to compatible celestial frames. No
 GPS, epoch, or precession conversion is performed. Angles are radians,
 locations metres and delays seconds. Source coordinates and gmst broadcast.
-
-Ported from ``astrogwb.detector.projection`` (astrogwb 0.7.0).
 """
 
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-SPEED_OF_LIGHT_M_S = 299792458.0
+from injstar.constants import SPEED_OF_LIGHT_M_S
 
 
 def antenna_pattern(
