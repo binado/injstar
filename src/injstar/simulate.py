@@ -1,8 +1,8 @@
 r"""SNR-level simulation.
 
-Batched JAX code that draws each detector's matched-filter SNR time series
-directly: expected complex SNR, whitened template autocorrelation and correlated
-Gaussian noise from one inverse FFT per detector, plus detection flags.
+Batched JAX code that builds each detector's frequency-domain data, the
+template at its expected SNR plus Gaussian noise, and matched-filters it against
+the template with one inverse FFT per detector, plus detection flags.
 
 For detector :math:`j`, with :math:`|h(f)|` the face-on amplitude at 1 Mpc and
 :math:`S_j` the one-sided PSD:
@@ -28,8 +28,8 @@ half of the two band-edge bins.
 
 The matched-filter quantities are the pure functions of
 :mod:`injstar.matched_filter`. Times are offsets from each event's geocentric
-coalescence time. JAX must run
-in 64-bit mode: call :func:`injstar.runtime.configure_runtime` first.
+coalescence time. JAX must run in 64-bit mode: call
+:func:`injstar.runtime.configure_runtime` first.
 
 Design: "SNR-level simulation" in docs/design.md.
 """
@@ -252,7 +252,12 @@ class Simulator:
         self.crop_samples = crop_samples
         self.noise = noise
         self.batch_size = batch_size
-        bins = self._band_bins()
+        bins = matched_filter.band_bins(
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=maximum_frequency,
+            sampling_frequency=sampling_frequency,
+            segment_duration=segment_duration,
+        )
         self.frequencies = bins * self.delta_f
         if psd.shape[-1] != len(bins):
             raise ValueError(
@@ -277,14 +282,6 @@ class Simulator:
         self._min_detectors = min_detectors
         self._root = jax.random.key(seed)
         self._batched = jax.jit(jax.vmap(self._event))
-
-    def _band_bins(self) -> NDArray[np.int_]:
-        return matched_filter.band_bins(
-            minimum_frequency=self.minimum_frequency,
-            maximum_frequency=self.maximum_frequency,
-            sampling_frequency=self.sampling_frequency,
-            segment_duration=self.segment_duration,
-        )
 
     @classmethod
     def from_config(cls, config: RunConfig, registry: DetectorRegistry) -> Self:
