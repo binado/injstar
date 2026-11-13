@@ -33,9 +33,47 @@ JAX must run in 64-bit mode: call :func:`injstar.runtime.configure_runtime`
 first.
 """
 
+import math
+
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.typing import ArrayLike
+from numpy.typing import NDArray
+
+
+def band_bins(
+    *,
+    minimum_frequency: float,
+    maximum_frequency: float,
+    sampling_frequency: float,
+    segment_duration: float,
+) -> NDArray[np.int_]:
+    """Indices of the band's bins on the periodic segment's frequency grid.
+
+    The segment has ``round(sampling_frequency * segment_duration)`` samples and
+    bin ``k`` is at ``k / segment_duration`` Hz. The band runs from the first bin
+    at or above ``minimum_frequency`` to the last at or below
+    ``maximum_frequency``, kept strictly below the Nyquist frequency.
+
+    Parameters
+    ----------
+    minimum_frequency, maximum_frequency
+        Band edges in Hz.
+    sampling_frequency
+        Sample rate of the series in Hz.
+    segment_duration
+        Length of the periodic segment in seconds.
+
+    Returns
+    -------
+    numpy.ndarray
+        Contiguous bin indices; empty if the band holds no bin.
+    """
+    n_samples = round(sampling_frequency * segment_duration)
+    first = math.ceil(minimum_frequency * segment_duration)
+    last = min(math.floor(maximum_frequency * segment_duration), n_samples // 2 - 1)
+    return np.arange(first, last + 1)
 
 
 def noise_weighted_inner_product(
@@ -153,15 +191,17 @@ def matched_filter_snr_series(
     template: ArrayLike,
     *,
     inverse_psd: ArrayLike,
-    bins: ArrayLike,
-    n_samples: int,
-    delta_f: float,
+    minimum_frequency: float,
+    maximum_frequency: float,
+    sampling_frequency: float,
+    segment_duration: float,
 ) -> jax.Array:
     r"""Complex matched-filter SNR time series on a periodic segment.
 
     Correlates the data with the unit-norm template at every lag with one
     inverse FFT over the segment's frequency grid; see the module docstring
-    for the formula.
+    for the formula. The grid follows from the sampling frequency and the
+    segment duration, and the arrays cover the bins of :func:`band_bins`.
 
     Parameters
     ----------
@@ -172,30 +212,47 @@ def matched_filter_snr_series(
     inverse_psd
         ``1 / S_n`` on the same bins, shape ``(detectors, bins)``; zero where
         undefined.
-    bins
-        Indices of the band's bins in the segment's frequency grid, shape
-        ``(bins,)``; the bin ``k`` has frequency ``k * delta_f``.
-    n_samples
-        Samples in the segment; the sampling frequency is
-        ``n_samples * delta_f``.
-    delta_f
-        Frequency spacing of the grid in Hz, the inverse of the segment length.
+    minimum_frequency, maximum_frequency
+        Band edges in Hz.
+    sampling_frequency
+        Sample rate of the series in Hz.
+    segment_duration
+        Length of the periodic segment in seconds.
 
     Returns
     -------
     jax.Array
-        Complex SNR series, shape ``(detectors, n_samples)``; sample ``m`` is at
-        time ``m / (n_samples * delta_f)``, periodic in the segment. It is zero
-        for a detector whose template has no weight.
+        Complex SNR series, shape ``(detectors, n_samples)`` with
+        ``n_samples = round(sampling_frequency * segment_duration)``; sample
+        ``m`` is at time ``m / sampling_frequency``, periodic in the segment. It
+        is zero for a detector whose template has no weight.
+
+    Raises
+    ------
+    ValueError
+        If the arrays do not have one entry per bin of the band.
     """
-    bins = jnp.asarray(bins)
+    bins = band_bins(
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+        sampling_frequency=sampling_frequency,
+        segment_duration=segment_duration,
+    )
+    n_samples = round(sampling_frequency * segment_duration)
+    delta_f = 1.0 / segment_duration
     template = jnp.asarray(template)
+    data = jnp.asarray(data, dtype=complex)
+    for name, array in (("data", data), ("template", template)):
+        if array.shape[-1] != len(bins):
+            raise ValueError(
+                f"{name} has {array.shape[-1]} bins but the band holds {len(bins)}"
+            )
     sigma = optimal_snr(template, inverse_psd=inverse_psd, delta_f=delta_f)
     safe_sigma = jnp.where(sigma > 0, sigma, 1.0)
     spectrum = (
         4
         * delta_f
-        * jnp.asarray(data, dtype=complex)
+        * data
         * jnp.conj(template)
         * inverse_psd
         / jnp.expand_dims(safe_sigma, -1)

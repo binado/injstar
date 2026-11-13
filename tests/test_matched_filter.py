@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from injstar.matched_filter import (
+    band_bins,
     first_frequency_cumulant,
     matched_filter_snr_series,
     noise_weighted_inner_product,
@@ -10,14 +11,21 @@ from injstar.matched_filter import (
     second_frequency_cumulant,
 )
 
-DELTA_F = 0.5
+SEGMENT_DURATION = 2.0
+SAMPLING_FREQUENCY = 512.0
+DELTA_F = 1 / SEGMENT_DURATION
 N_SAMPLES = 1024
-SAMPLING_FREQUENCY = N_SAMPLES * DELTA_F
+BAND = {
+    "minimum_frequency": 10.0,
+    "maximum_frequency": 99.5,
+    "sampling_frequency": SAMPLING_FREQUENCY,
+    "segment_duration": SEGMENT_DURATION,
+}
 
 
 @pytest.fixture
 def bins() -> np.ndarray:
-    return np.arange(20, 200)
+    return band_bins(**BAND)
 
 
 @pytest.fixture
@@ -46,6 +54,30 @@ def injected(
     sigma = optimal_snr(template, inverse_psd=inverse_psd, delta_f=DELTA_F)
     phase = jnp.exp(-2j * jnp.pi * frequencies * peak_time[:, None])
     return (rho / sigma)[:, None] * template * phase
+
+
+@pytest.mark.parametrize(
+    ("overrides", "first", "last"),
+    [
+        ({}, 20, 199),
+        ({"minimum_frequency": 10.1}, 21, 199),
+        ({"maximum_frequency": 99.9}, 20, 199),
+        ({"maximum_frequency": 1000.0}, 20, N_SAMPLES // 2 - 1),
+        ({"segment_duration": 4.0, "sampling_frequency": 256.0}, 40, 398),
+    ],
+)
+def test_band_bins_span_the_band_on_the_segment_grid(
+    overrides: dict[str, float], first: int, last: int
+) -> None:
+    bins = band_bins(**(BAND | overrides))
+
+    np.testing.assert_array_equal(bins, np.arange(first, last + 1))
+
+
+def test_band_bins_are_empty_for_a_band_between_bins() -> None:
+    bins = band_bins(**(BAND | {"minimum_frequency": 10.1, "maximum_frequency": 10.4}))
+
+    assert len(bins) == 0
 
 
 def test_inner_product_of_unit_template_is_four_df_per_unit_weight() -> None:
@@ -141,9 +173,7 @@ def test_series_of_injected_template_peaks_at_its_time_with_its_snr(
         data,
         template,
         inverse_psd=inverse_psd,
-        bins=bins,
-        n_samples=N_SAMPLES,
-        delta_f=DELTA_F,
+        **BAND,
     )
 
     assert series.shape == (2, N_SAMPLES)
@@ -159,15 +189,11 @@ def test_series_is_linear_in_the_data(
 ) -> None:
     rho = jnp.array([8.0, 5.0], dtype=complex)
     data = injected(template, frequencies, rho, jnp.array([0.1, 0.2]), inverse_psd)
-    kwargs = {
-        "inverse_psd": inverse_psd,
-        "bins": bins,
-        "n_samples": N_SAMPLES,
-        "delta_f": DELTA_F,
-    }
 
-    single = matched_filter_snr_series(data, template, **kwargs)
-    double = matched_filter_snr_series(2 * data, template, **kwargs)
+    single = matched_filter_snr_series(data, template, inverse_psd=inverse_psd, **BAND)
+    double = matched_filter_snr_series(
+        2 * data, template, inverse_psd=inverse_psd, **BAND
+    )
 
     np.testing.assert_allclose(double, 2 * single)
 
@@ -178,15 +204,11 @@ def test_series_ignores_data_in_bins_without_a_psd(
     inverse_psd = jnp.ones((1, len(bins))).at[:, :10].set(0.0)
     clean = jnp.ones((1, len(bins)), dtype=complex)
     dirty = clean.at[:, :10].set(1e6)
-    kwargs = {
-        "inverse_psd": inverse_psd,
-        "bins": bins,
-        "n_samples": N_SAMPLES,
-        "delta_f": DELTA_F,
-    }
 
-    expected = matched_filter_snr_series(clean, template, **kwargs)
-    result = matched_filter_snr_series(dirty, template, **kwargs)
+    expected = matched_filter_snr_series(
+        clean, template, inverse_psd=inverse_psd, **BAND
+    )
+    result = matched_filter_snr_series(dirty, template, inverse_psd=inverse_psd, **BAND)
 
     np.testing.assert_allclose(result, expected)
 
@@ -208,10 +230,19 @@ def test_series_of_noise_has_unit_variance_per_component(
         noise,
         template,
         inverse_psd=jnp.broadcast_to(1 / psd, (draws, len(bins))),
-        bins=bins,
-        n_samples=N_SAMPLES,
-        delta_f=DELTA_F,
+        **BAND,
     )
 
     np.testing.assert_allclose(np.std(series.real), 1.0, rtol=0.1)
     np.testing.assert_allclose(np.std(series.imag), 1.0, rtol=0.1)
+
+
+def test_series_rejects_arrays_that_do_not_match_the_band(
+    template: jnp.ndarray, inverse_psd: jnp.ndarray
+) -> None:
+    short = jnp.ones((2, len(template) - 1), dtype=complex)
+
+    with pytest.raises(ValueError, match="bins"):
+        matched_filter_snr_series(
+            short, template[:-1], inverse_psd=inverse_psd[:, :-1], **BAND
+        )

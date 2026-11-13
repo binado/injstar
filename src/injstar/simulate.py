@@ -193,16 +193,16 @@ class Simulator:
     locations
         Earth-fixed positions in metres, shape ``(detectors, 3)``.
     psd
-        One-sided PSD of each detector at ``bins * delta_f``, shape
-        ``(detectors, len(bins))``; non-finite where it is undefined.
-    bins
-        Indices, in the periodic segment's frequency grid, of the band's bins.
-    n_samples
-        Samples in the periodic segment.
-    delta_f
-        Frequency spacing of the segment in Hz.
+        One-sided PSD of each detector on the bins of
+        :func:`injstar.matched_filter.band_bins`, shape ``(detectors, bins)``;
+        non-finite where it is undefined.
+    minimum_frequency, maximum_frequency
+        Frequency band of the matched filter in Hz.
     sampling_frequency
         Sample rate of the SNR series in Hz.
+    segment_duration
+        Length in seconds of the periodic segment; the frequency spacing is its
+        inverse.
     crop_samples
         Odd number of samples in the cropped SNR series.
     waveform
@@ -225,10 +225,10 @@ class Simulator:
         responses: NDArray[np.float64],
         locations: NDArray[np.float64],
         psd: NDArray[np.float64],
-        bins: NDArray[np.int_],
-        n_samples: int,
-        delta_f: float,
+        minimum_frequency: float,
+        maximum_frequency: float,
         sampling_frequency: float,
+        segment_duration: float,
         crop_samples: int,
         waveform: ripplegw.AmplitudePhaseWaveform,
         detector_snr: float,
@@ -243,14 +243,21 @@ class Simulator:
                 "JAX must run in 64-bit mode; call injstar.runtime.configure_runtime()"
             )
         self.names = tuple(names)
-        self.n_samples = n_samples
-        self.delta_f = delta_f
+        self.minimum_frequency = minimum_frequency
+        self.maximum_frequency = maximum_frequency
         self.sampling_frequency = sampling_frequency
+        self.segment_duration = segment_duration
+        self.n_samples = round(sampling_frequency * segment_duration)
+        self.delta_f = 1.0 / segment_duration
         self.crop_samples = crop_samples
         self.noise = noise
         self.batch_size = batch_size
-        self._bins = np.asarray(bins)
-        self.frequencies = self._bins * delta_f
+        bins = self._band_bins()
+        self.frequencies = bins * self.delta_f
+        if psd.shape[-1] != len(bins):
+            raise ValueError(
+                f"psd has {psd.shape[-1]} bins but the band holds {len(bins)}"
+            )
 
         self._inverse_psd = np.where(np.isfinite(psd), 1.0 / psd, 0.0)
         empty = [
@@ -271,6 +278,14 @@ class Simulator:
         self._root = jax.random.key(seed)
         self._batched = jax.jit(jax.vmap(self._event))
 
+    def _band_bins(self) -> NDArray[np.int_]:
+        return matched_filter.band_bins(
+            minimum_frequency=self.minimum_frequency,
+            maximum_frequency=self.maximum_frequency,
+            sampling_frequency=self.sampling_frequency,
+            segment_duration=self.segment_duration,
+        )
+
     @classmethod
     def from_config(cls, config: RunConfig, registry: DetectorRegistry) -> Self:
         """Build the simulator for a run configuration.
@@ -290,16 +305,15 @@ class Simulator:
         """
         names, responses, locations = registry.arrays(config.network)
 
-        n_samples = config.segment_samples
-        delta_f = 1.0 / config.segment_duration
-        first = int(np.ceil(config.minimum_frequency / delta_f))
-        last = min(
-            int(np.floor(config.maximum_frequency / delta_f)), n_samples // 2 - 1
+        bins = matched_filter.band_bins(
+            minimum_frequency=config.minimum_frequency,
+            maximum_frequency=config.maximum_frequency,
+            sampling_frequency=config.sampling_frequency,
+            segment_duration=config.segment_duration,
         )
-        if last - first < 2:
+        if len(bins) < 3:
             raise ValueError("the frequency band holds fewer than three bins")
-        bins = np.arange(first, last + 1)
-        frequencies = bins * delta_f
+        frequencies = bins / config.segment_duration
         psd = np.stack(
             [registry.detectors[name].sensitivity(frequencies) for name in names]
         )
@@ -317,10 +331,10 @@ class Simulator:
             responses=responses,
             locations=locations,
             psd=psd,
-            bins=bins,
-            n_samples=n_samples,
-            delta_f=delta_f,
+            minimum_frequency=config.minimum_frequency,
+            maximum_frequency=config.maximum_frequency,
             sampling_frequency=config.sampling_frequency,
+            segment_duration=config.segment_duration,
             crop_samples=config.crop_samples,
             waveform=waveform,
             detector_snr=config.detection.detector_snr,
@@ -405,9 +419,10 @@ class Simulator:
             data,
             amplitude,
             inverse_psd=inverse_psd,
-            bins=self._bins,
-            n_samples=n,
-            delta_f=df,
+            minimum_frequency=self.minimum_frequency,
+            maximum_frequency=self.maximum_frequency,
+            sampling_frequency=self.sampling_frequency,
+            segment_duration=self.segment_duration,
         )
 
         centre = n // 2 + jnp.round(delay * rate).astype(jnp.int64)
