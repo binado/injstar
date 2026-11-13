@@ -143,13 +143,6 @@ def greenwich_sidereal_time(gps_times: NDArray[np.float64]) -> NDArray[np.float6
     )
 
 
-def _event_key(root: jax.Array, event_id: jax.Array) -> jax.Array:
-    """A key that depends only on the root key and the 64-bit event id."""
-    high = (event_id >> 32).astype(jnp.uint32)
-    low = (event_id & 0xFFFFFFFF).astype(jnp.uint32)
-    return jax.random.fold_in(jax.random.fold_in(root, high), low)
-
-
 class Simulator:
     """SNR-level simulator for one network and one run configuration.
 
@@ -268,9 +261,12 @@ class Simulator:
             * (jnp.cos(phase) + 1j * jnp.sin(phase))
         )
         if config.noise:
-            draw = jax.random.normal(
-                _event_key(self._root, event["event_id"]), (*power.shape, 2)
-            )
+            # The key depends only on the root key and the 64-bit event id.
+            event_id = event["event_id"]
+            high = (event_id >> 32).astype(jnp.uint32)
+            low = (event_id & 0xFFFFFFFF).astype(jnp.uint32)
+            key = jax.random.fold_in(jax.random.fold_in(self._root, high), low)
+            draw = jax.random.normal(key, (*power.shape, 2))
             white = draw[..., 0] + 1j * draw[..., 1]
             spectrum = spectrum + (
                 (2 * jnp.sqrt(df) / safe_sigma)[:, None]
