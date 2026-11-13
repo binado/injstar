@@ -7,7 +7,7 @@ manifest, and the per-map statistics that make up the summary.
 A table is an HDF5 file with one dataset per column, written beside its
 destination and renamed onto it.
 
-Design: "Outputs" in docs/design.md. Nothing here imports JAX.
+Nothing here imports JAX.
 """
 
 import hashlib
@@ -307,7 +307,7 @@ def map_statistics(
     36+29 binary black hole, 16384 Hz), such pixels held 0% of the sky
     probability at network SNR 100, 1% at 300, 8% at 400, 24% at 500 and 52% at
     1000, including the peak pixel. Local builds of the same source did not
-    fail, so this is specific to that wheel (see docs/audit.md).
+    fail, so this is specific to that wheel.
 
     The distance quantiles, ``distmean`` and ``diststd`` use only the pixels
     with a valid distance layer, with their probabilities renormalised.

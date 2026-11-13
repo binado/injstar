@@ -1,8 +1,8 @@
 r"""SNR-level simulation.
 
-Batched JAX code that draws each detector's matched-filter SNR time series
-directly: expected complex SNR, whitened template autocorrelation and correlated
-Gaussian noise from one inverse FFT per detector, plus detection flags.
+Batched JAX code that builds each detector's frequency-domain data, the
+template at its expected SNR plus Gaussian noise, and matched-filters it against
+the template with one inverse FFT per detector, plus detection flags.
 
 For detector :math:`j`, with :math:`|h(f)|` the face-on amplitude at 1 Mpc and
 :math:`S_j` the one-sided PSD:
@@ -26,10 +26,10 @@ The rectangle sum is used for :math:`\sigma_j` so that :math:`A_j(0) = 1` exactl
 on the grid; ligo.skymap's own horizon uses a trapezoid rule, which differs only by
 half of the two band-edge bins.
 
-Times are offsets from each event's geocentric coalescence time. JAX must run
-in 64-bit mode: call :func:`injstar.runtime.configure_runtime` first.
-
-Design: "SNR-level simulation" in docs/design.md.
+The matched-filter quantities are the pure functions of
+:mod:`injstar.matched_filter`. Times are offsets from each event's geocentric
+coalescence time. JAX must run in 64-bit mode: call
+:func:`injstar.runtime.configure_runtime` first.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
@@ -43,6 +43,7 @@ import numpy as np
 import ripplegw
 from numpy.typing import NDArray
 
+from injstar import matched_filter
 from injstar.config import RunConfig
 from injstar.detector import projection
 from injstar.detector.network import DetectorRegistry
@@ -144,6 +145,36 @@ def greenwich_sidereal_time(gps_times: NDArray[np.float64]) -> NDArray[np.float6
     )
 
 
+def _signal_spectrum(
+    unit_template: jax.Array,
+    *,
+    rho: jax.Array,
+    peak_time: jax.Array,
+    frequencies: jax.Array,
+) -> jax.Array:
+    """Frequency-domain data holding the template at the given SNR and time.
+
+    Matched-filtering it against the unit-norm template gives ``rho`` at
+    ``peak_time``. Shape ``(detectors, bins)``.
+    """
+    phase = -2 * jnp.pi * frequencies * peak_time[:, None]
+    return rho[:, None] * unit_template * (jnp.cos(phase) + 1j * jnp.sin(phase))
+
+
+def _noise_spectrum(
+    white: jax.Array, *, inverse_psd: jax.Array, delta_f: float
+) -> jax.Array:
+    """Frequency-domain Gaussian noise with one-sided PSD ``1 / inverse_psd``.
+
+    ``white`` has independent standard normal real and imaginary parts. Bins
+    without a PSD (``inverse_psd == 0``) carry no noise.
+    """
+    psd = jnp.where(
+        inverse_psd > 0, 1.0 / jnp.where(inverse_psd > 0, inverse_psd, 1.0), 0.0
+    )
+    return jnp.sqrt(psd / (4 * delta_f)) * white
+
+
 class Simulator:
     """SNR-level simulator for one network and one band.
 
@@ -158,16 +189,16 @@ class Simulator:
     locations
         Earth-fixed positions in metres, shape ``(detectors, 3)``.
     psd
-        One-sided PSD of each detector at ``bins * delta_f``, shape
-        ``(detectors, len(bins))``; non-finite where it is undefined.
-    bins
-        Indices, in the periodic segment's frequency grid, of the band's bins.
-    n_samples
-        Samples in the periodic segment.
-    delta_f
-        Frequency spacing of the segment in Hz.
+        One-sided PSD of each detector on the bins of
+        :func:`injstar.matched_filter.band_bins`, shape ``(detectors, bins)``;
+        non-finite where it is undefined.
+    minimum_frequency, maximum_frequency
+        Frequency band of the matched filter in Hz.
     sampling_frequency
         Sample rate of the SNR series in Hz.
+    segment_duration
+        Length in seconds of the periodic segment; the frequency spacing is its
+        inverse.
     crop_samples
         Odd number of samples in the cropped SNR series.
     waveform
@@ -190,10 +221,10 @@ class Simulator:
         responses: NDArray[np.float64],
         locations: NDArray[np.float64],
         psd: NDArray[np.float64],
-        bins: NDArray[np.int_],
-        n_samples: int,
-        delta_f: float,
+        minimum_frequency: float,
+        maximum_frequency: float,
         sampling_frequency: float,
+        segment_duration: float,
         crop_samples: int,
         waveform: ripplegw.AmplitudePhaseWaveform,
         detector_snr: float,
@@ -208,14 +239,26 @@ class Simulator:
                 "JAX must run in 64-bit mode; call injstar.runtime.configure_runtime()"
             )
         self.names = tuple(names)
-        self.n_samples = n_samples
-        self.delta_f = delta_f
+        self.minimum_frequency = minimum_frequency
+        self.maximum_frequency = maximum_frequency
         self.sampling_frequency = sampling_frequency
+        self.segment_duration = segment_duration
+        self.n_samples = round(sampling_frequency * segment_duration)
+        self.delta_f = 1.0 / segment_duration
         self.crop_samples = crop_samples
         self.noise = noise
         self.batch_size = batch_size
-        self._bins = np.asarray(bins)
-        self.frequencies = self._bins * delta_f
+        bins = matched_filter.band_bins(
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=maximum_frequency,
+            sampling_frequency=sampling_frequency,
+            segment_duration=segment_duration,
+        )
+        self.frequencies = bins * self.delta_f
+        if psd.shape[-1] != len(bins):
+            raise ValueError(
+                f"psd has {psd.shape[-1]} bins but the band holds {len(bins)}"
+            )
 
         self._inverse_psd = np.where(np.isfinite(psd), 1.0 / psd, 0.0)
         empty = [
@@ -255,16 +298,15 @@ class Simulator:
         """
         names, responses, locations = registry.arrays(config.network)
 
-        n_samples = config.segment_samples
-        delta_f = 1.0 / config.segment_duration
-        first = int(np.ceil(config.minimum_frequency / delta_f))
-        last = min(
-            int(np.floor(config.maximum_frequency / delta_f)), n_samples // 2 - 1
+        bins = matched_filter.band_bins(
+            minimum_frequency=config.minimum_frequency,
+            maximum_frequency=config.maximum_frequency,
+            sampling_frequency=config.sampling_frequency,
+            segment_duration=config.segment_duration,
         )
-        if last - first < 2:
+        if len(bins) < 3:
             raise ValueError("the frequency band holds fewer than three bins")
-        bins = np.arange(first, last + 1)
-        frequencies = bins * delta_f
+        frequencies = bins / config.segment_duration
         psd = np.stack(
             [registry.detectors[name].sensitivity(frequencies) for name in names]
         )
@@ -282,10 +324,10 @@ class Simulator:
             responses=responses,
             locations=locations,
             psd=psd,
-            bins=bins,
-            n_samples=n_samples,
-            delta_f=delta_f,
+            minimum_frequency=config.minimum_frequency,
+            maximum_frequency=config.maximum_frequency,
             sampling_frequency=config.sampling_frequency,
+            segment_duration=config.segment_duration,
             crop_samples=config.crop_samples,
             waveform=waveform,
             detector_snr=config.detection.detector_snr,
@@ -315,16 +357,14 @@ class Simulator:
             },
         )
         amplitude = jnp.nan_to_num(amplitude, nan=0.0, posinf=0.0, neginf=0.0)
-        power = amplitude**2 * inverse_psd
-        total = jnp.sum(power, axis=-1)
-        safe_total = jnp.where(total > 0, total, 1.0)
-        sigma = jnp.sqrt(4 * df * total)
-        safe_sigma = jnp.where(sigma > 0, sigma, 1.0)
-
-        omega = 2 * jnp.pi * frequencies
-        mean = jnp.sum(omega * power, axis=-1) / safe_total
-        mean_square = jnp.sum(omega**2 * power, axis=-1) / safe_total
-        bandwidth = jnp.sqrt(jnp.maximum(mean_square - mean**2, 0.0))
+        sigma = matched_filter.optimal_snr(
+            amplitude, inverse_psd=inverse_psd, delta_f=df
+        )
+        bandwidth = jnp.sqrt(
+            matched_filter.second_frequency_cumulant(
+                amplitude, frequencies=frequencies, inverse_psd=inverse_psd
+            )
+        )
 
         sky = {
             "right_ascension": event["right_ascension"],
@@ -351,11 +391,9 @@ class Simulator:
 
         # The geocentric time sits on sample n // 2 of the periodic segment.
         peak_time = (n // 2) / rate + delay
-        phase = -2 * jnp.pi * frequencies * peak_time[:, None]
-        spectrum = (
-            (power / safe_total[:, None])
-            * rho[:, None]
-            * (jnp.cos(phase) + 1j * jnp.sin(phase))
+        unit_template = amplitude / jnp.where(sigma > 0, sigma, 1.0)[:, None]
+        data = _signal_spectrum(
+            unit_template, rho=rho, peak_time=peak_time, frequencies=frequencies
         )
         if self.noise:
             # The key depends only on the root key and the 64-bit event id.
@@ -363,18 +401,19 @@ class Simulator:
             high = (event_id >> 32).astype(jnp.uint32)
             low = (event_id & 0xFFFFFFFF).astype(jnp.uint32)
             key = jax.random.fold_in(jax.random.fold_in(self._root, high), low)
-            draw = jax.random.normal(key, (*power.shape, 2))
-            white = draw[..., 0] + 1j * draw[..., 1]
-            spectrum = spectrum + (
-                (2 * jnp.sqrt(df) / safe_sigma)[:, None]
-                * amplitude
-                * jnp.sqrt(inverse_psd)
-                * white
+            draw = jax.random.normal(key, (*inverse_psd.shape, 2))
+            data = data + _noise_spectrum(
+                draw[..., 0] + 1j * draw[..., 1], inverse_psd=inverse_psd, delta_f=df
             )
-
-        full = jnp.zeros((len(self.names), n), dtype=spectrum.dtype)
-        full = full.at[:, jnp.asarray(self._bins)].set(spectrum)
-        series = n * jnp.fft.ifft(full, axis=-1)
+        series = matched_filter.matched_filter_snr_series(
+            data,
+            unit_template,
+            inverse_psd=inverse_psd,
+            minimum_frequency=self.minimum_frequency,
+            maximum_frequency=self.maximum_frequency,
+            sampling_frequency=self.sampling_frequency,
+            segment_duration=self.segment_duration,
+        )
 
         centre = n // 2 + jnp.round(delay * rate).astype(jnp.int64)
         offsets = jnp.arange(-self._half, self._half + 1)
