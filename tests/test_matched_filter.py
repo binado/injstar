@@ -12,6 +12,7 @@ from injstar.matched_filter import (
 
 DELTA_F = 0.5
 N_SAMPLES = 1024
+SAMPLING_FREQUENCY = N_SAMPLES * DELTA_F
 
 
 @pytest.fixture
@@ -25,7 +26,7 @@ def frequencies(bins: np.ndarray) -> np.ndarray:
 
 
 @pytest.fixture
-def amplitude(frequencies: np.ndarray) -> jnp.ndarray:
+def template(frequencies: np.ndarray) -> jnp.ndarray:
     return jnp.asarray(frequencies ** (-7 / 6))
 
 
@@ -34,11 +35,25 @@ def inverse_psd(bins: np.ndarray) -> jnp.ndarray:
     return jnp.ones((2, len(bins)))
 
 
-def test_inner_product_of_unit_template_is_four_df_per_unit_weight() -> None:
-    h = jnp.ones(10)
-    inverse_psd = jnp.full(10, 0.25)
+def injected(
+    template: jnp.ndarray,
+    frequencies: np.ndarray,
+    rho: jnp.ndarray,
+    peak_time: jnp.ndarray,
+    inverse_psd: jnp.ndarray,
+) -> jnp.ndarray:
+    """Data holding the template with matched-filter SNR ``rho`` at ``peak_time``."""
+    sigma = optimal_snr(template, inverse_psd=inverse_psd, delta_f=DELTA_F)
+    phase = jnp.exp(-2j * jnp.pi * frequencies * peak_time[:, None])
+    return (rho / sigma)[:, None] * template * phase
 
-    value = noise_weighted_inner_product(h, h, inverse_psd, delta_f=2.0)
+
+def test_inner_product_of_unit_template_is_four_df_per_unit_weight() -> None:
+    template = jnp.ones(10)
+
+    value = noise_weighted_inner_product(
+        template, template, inverse_psd=jnp.full(10, 0.25), delta_f=2.0
+    )
 
     assert value == pytest.approx(4 * 2.0 * 10 * 0.25)
 
@@ -48,78 +63,87 @@ def test_inner_product_is_real_and_symmetric() -> None:
     b = jnp.array([2 - 1j, 1j, 4 + 0j])
     inverse_psd = jnp.array([1.0, 2.0, 0.5])
 
-    forward = noise_weighted_inner_product(a, b, inverse_psd, 1.0)
-    backward = noise_weighted_inner_product(b, a, inverse_psd, 1.0)
+    forward = noise_weighted_inner_product(a, b, inverse_psd=inverse_psd, delta_f=1.0)
+    backward = noise_weighted_inner_product(b, a, inverse_psd=inverse_psd, delta_f=1.0)
 
     assert jnp.isrealobj(forward)
     assert forward == pytest.approx(backward)
 
 
 def test_inner_product_ignores_bins_with_zero_inverse_psd() -> None:
-    h = jnp.array([1.0, 5.0, 1.0])
+    template = jnp.array([1.0, 5.0, 1.0])
 
-    masked = noise_weighted_inner_product(h, h, jnp.array([1.0, 0.0, 1.0]), 1.0)
+    masked = noise_weighted_inner_product(
+        template, template, inverse_psd=jnp.array([1.0, 0.0, 1.0]), delta_f=1.0
+    )
 
     assert masked == pytest.approx(4 * 2.0)
 
 
 def test_optimal_snr_scales_linearly_with_the_template(
-    amplitude: jnp.ndarray, inverse_psd: jnp.ndarray
+    template: jnp.ndarray, inverse_psd: jnp.ndarray
 ) -> None:
-    base = optimal_snr(amplitude, inverse_psd, DELTA_F)
-    scaled = optimal_snr(3.0 * amplitude, inverse_psd, DELTA_F)
+    base = optimal_snr(template, inverse_psd=inverse_psd, delta_f=DELTA_F)
+    scaled = optimal_snr(3.0 * template, inverse_psd=inverse_psd, delta_f=DELTA_F)
 
     np.testing.assert_allclose(scaled, 3.0 * base)
 
 
-def test_optimal_snr_is_zero_without_weight(amplitude: jnp.ndarray) -> None:
-    zero = jnp.zeros((1, len(amplitude)))
+def test_optimal_snr_is_zero_without_weight(template: jnp.ndarray) -> None:
+    zero = jnp.zeros((1, len(template)))
 
-    assert optimal_snr(amplitude, zero, DELTA_F) == 0.0
+    assert optimal_snr(template, inverse_psd=zero, delta_f=DELTA_F) == 0.0
 
 
 def test_cumulants_of_a_single_line_are_its_frequency_and_zero_variance() -> None:
-    frequencies = jnp.array([10.0, 20.0, 30.0])
-    h = jnp.array([0.0, 1.0, 0.0])
-    inverse_psd = jnp.ones(3)
+    kwargs = {"frequencies": jnp.array([10.0, 20.0, 30.0]), "inverse_psd": jnp.ones(3)}
+    template = jnp.array([0.0, 1.0, 0.0])
 
-    assert first_frequency_cumulant(frequencies, h, inverse_psd) == pytest.approx(
+    assert first_frequency_cumulant(template, **kwargs) == pytest.approx(
         2 * np.pi * 20.0
     )
-    assert second_frequency_cumulant(frequencies, h, inverse_psd) == pytest.approx(0.0)
+    assert second_frequency_cumulant(template, **kwargs) == pytest.approx(0.0)
 
 
 def test_cumulants_of_two_equal_lines_are_their_midpoint_and_half_spacing() -> None:
-    frequencies = jnp.array([10.0, 30.0])
-    h = jnp.ones(2)
-    inverse_psd = jnp.ones(2)
+    kwargs = {"frequencies": jnp.array([10.0, 30.0]), "inverse_psd": jnp.ones(2)}
+    template = jnp.ones(2)
 
-    assert first_frequency_cumulant(frequencies, h, inverse_psd) == pytest.approx(
+    assert first_frequency_cumulant(template, **kwargs) == pytest.approx(
         2 * np.pi * 20.0
     )
-    assert second_frequency_cumulant(frequencies, h, inverse_psd) == pytest.approx(
+    assert second_frequency_cumulant(template, **kwargs) == pytest.approx(
         (2 * np.pi * 10.0) ** 2
     )
 
 
 def test_cumulants_are_zero_without_weight() -> None:
-    frequencies = jnp.array([10.0, 20.0])
-    h = jnp.ones(2)
-    zero = jnp.zeros(2)
+    kwargs = {"frequencies": jnp.array([10.0, 20.0]), "inverse_psd": jnp.zeros(2)}
+    template = jnp.ones(2)
 
-    assert first_frequency_cumulant(frequencies, h, zero) == 0.0
-    assert second_frequency_cumulant(frequencies, h, zero) == 0.0
+    assert first_frequency_cumulant(template, **kwargs) == 0.0
+    assert second_frequency_cumulant(template, **kwargs) == 0.0
 
 
-def test_series_peaks_at_the_peak_time_with_the_expected_snr(
-    amplitude: jnp.ndarray, inverse_psd: jnp.ndarray, bins: np.ndarray
+def test_series_of_injected_template_peaks_at_its_time_with_its_snr(
+    template: jnp.ndarray,
+    inverse_psd: jnp.ndarray,
+    frequencies: np.ndarray,
+    bins: np.ndarray,
 ) -> None:
-    rate = N_SAMPLES * DELTA_F
     peak_sample = np.array([100, 300])
     rho = jnp.array([8.0 * np.exp(0.7j), 5.0 * np.exp(-1.2j)])
+    data = injected(
+        template, frequencies, rho, peak_sample / SAMPLING_FREQUENCY, inverse_psd
+    )
 
     series = matched_filter_snr_series(
-        amplitude, inverse_psd, rho, peak_sample / rate, bins, N_SAMPLES, DELTA_F
+        data,
+        template,
+        inverse_psd=inverse_psd,
+        bins=bins,
+        n_samples=N_SAMPLES,
+        delta_f=DELTA_F,
     )
 
     assert series.shape == (2, N_SAMPLES)
@@ -127,38 +151,66 @@ def test_series_peaks_at_the_peak_time_with_the_expected_snr(
     np.testing.assert_allclose(series[[0, 1], peak_sample], rho, rtol=1e-10)
 
 
-def test_series_without_noise_never_exceeds_the_expected_snr(
-    amplitude: jnp.ndarray, inverse_psd: jnp.ndarray, bins: np.ndarray
+def test_series_is_linear_in_the_data(
+    template: jnp.ndarray,
+    inverse_psd: jnp.ndarray,
+    frequencies: np.ndarray,
+    bins: np.ndarray,
 ) -> None:
     rho = jnp.array([8.0, 5.0], dtype=complex)
+    data = injected(template, frequencies, rho, jnp.array([0.1, 0.2]), inverse_psd)
+    kwargs = {
+        "inverse_psd": inverse_psd,
+        "bins": bins,
+        "n_samples": N_SAMPLES,
+        "delta_f": DELTA_F,
+    }
 
-    series = matched_filter_snr_series(
-        amplitude, inverse_psd, rho, jnp.array([0.1, 0.2]), bins, N_SAMPLES, DELTA_F
-    )
+    single = matched_filter_snr_series(data, template, **kwargs)
+    double = matched_filter_snr_series(2 * data, template, **kwargs)
 
-    assert np.all(np.abs(series) <= np.abs(rho)[:, None] * (1 + 1e-10))
+    np.testing.assert_allclose(double, 2 * single)
 
 
-def test_series_noise_has_unit_variance_per_component(
-    amplitude: jnp.ndarray, bins: np.ndarray
+def test_series_ignores_data_in_bins_without_a_psd(
+    template: jnp.ndarray, bins: np.ndarray
 ) -> None:
-    # One row per independent noise draw; the signal is switched off by rho = 0.
+    inverse_psd = jnp.ones((1, len(bins))).at[:, :10].set(0.0)
+    clean = jnp.ones((1, len(bins)), dtype=complex)
+    dirty = clean.at[:, :10].set(1e6)
+    kwargs = {
+        "inverse_psd": inverse_psd,
+        "bins": bins,
+        "n_samples": N_SAMPLES,
+        "delta_f": DELTA_F,
+    }
+
+    expected = matched_filter_snr_series(clean, template, **kwargs)
+    result = matched_filter_snr_series(dirty, template, **kwargs)
+
+    np.testing.assert_allclose(result, expected)
+
+
+def test_series_of_noise_has_unit_variance_per_component(
+    template: jnp.ndarray, bins: np.ndarray
+) -> None:
+    # Gaussian noise of one-sided PSD S has per-bin variance S / (4 df), so it
+    # matched-filters to unit variance per real and imaginary component.
     draws = 2000
-    inverse_psd = jnp.ones((draws, len(bins)))
+    psd = 2.0 + np.linspace(0.0, 1.0, len(bins))
     rng = np.random.default_rng(0)
     white = rng.standard_normal((draws, len(bins))) + 1j * rng.standard_normal(
         (draws, len(bins))
     )
+    noise = np.sqrt(psd / (4 * DELTA_F)) * white
 
     series = matched_filter_snr_series(
-        amplitude,
-        inverse_psd,
-        jnp.zeros(draws, dtype=complex),
-        jnp.zeros(draws),
-        bins,
-        N_SAMPLES,
-        DELTA_F,
-        white,
+        noise,
+        template,
+        inverse_psd=jnp.broadcast_to(1 / psd, (draws, len(bins))),
+        bins=bins,
+        n_samples=N_SAMPLES,
+        delta_f=DELTA_F,
     )
 
     np.testing.assert_allclose(np.std(series.real), 1.0, rtol=0.1)

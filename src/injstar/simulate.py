@@ -147,6 +147,38 @@ def greenwich_sidereal_time(gps_times: NDArray[np.float64]) -> NDArray[np.float6
     )
 
 
+def _signal_spectrum(
+    template: jax.Array,
+    *,
+    rho: jax.Array,
+    sigma: jax.Array,
+    peak_time: jax.Array,
+    frequencies: jax.Array,
+) -> jax.Array:
+    """Frequency-domain data holding the template at the given SNR and time.
+
+    Matched-filtering it against the unit-norm template gives ``rho`` at
+    ``peak_time``. Shape ``(detectors, bins)``.
+    """
+    scale = rho / jnp.where(sigma > 0, sigma, 1.0)
+    phase = -2 * jnp.pi * frequencies * peak_time[:, None]
+    return scale[:, None] * template * (jnp.cos(phase) + 1j * jnp.sin(phase))
+
+
+def _noise_spectrum(
+    white: jax.Array, *, inverse_psd: jax.Array, delta_f: float
+) -> jax.Array:
+    """Frequency-domain Gaussian noise with one-sided PSD ``1 / inverse_psd``.
+
+    ``white`` has independent standard normal real and imaginary parts. Bins
+    without a PSD (``inverse_psd == 0``) carry no noise.
+    """
+    psd = jnp.where(
+        inverse_psd > 0, 1.0 / jnp.where(inverse_psd > 0, inverse_psd, 1.0), 0.0
+    )
+    return jnp.sqrt(psd / (4 * delta_f)) * white
+
+
 class Simulator:
     """SNR-level simulator for one network and one band.
 
@@ -318,10 +350,12 @@ class Simulator:
             },
         )
         amplitude = jnp.nan_to_num(amplitude, nan=0.0, posinf=0.0, neginf=0.0)
-        sigma = matched_filter.optimal_snr(amplitude, inverse_psd, df)
+        sigma = matched_filter.optimal_snr(
+            amplitude, inverse_psd=inverse_psd, delta_f=df
+        )
         bandwidth = jnp.sqrt(
             matched_filter.second_frequency_cumulant(
-                frequencies, amplitude, inverse_psd
+                amplitude, frequencies=frequencies, inverse_psd=inverse_psd
             )
         )
 
@@ -350,7 +384,13 @@ class Simulator:
 
         # The geocentric time sits on sample n // 2 of the periodic segment.
         peak_time = (n // 2) / rate + delay
-        white = None
+        data = _signal_spectrum(
+            amplitude,
+            rho=rho,
+            sigma=sigma,
+            peak_time=peak_time,
+            frequencies=frequencies,
+        )
         if self.noise:
             # The key depends only on the root key and the 64-bit event id.
             event_id = event["event_id"]
@@ -358,9 +398,16 @@ class Simulator:
             low = (event_id & 0xFFFFFFFF).astype(jnp.uint32)
             key = jax.random.fold_in(jax.random.fold_in(self._root, high), low)
             draw = jax.random.normal(key, (*inverse_psd.shape, 2))
-            white = draw[..., 0] + 1j * draw[..., 1]
+            data = data + _noise_spectrum(
+                draw[..., 0] + 1j * draw[..., 1], inverse_psd=inverse_psd, delta_f=df
+            )
         series = matched_filter.matched_filter_snr_series(
-            amplitude, inverse_psd, rho, peak_time, self._bins, n, df, white
+            data,
+            amplitude,
+            inverse_psd=inverse_psd,
+            bins=self._bins,
+            n_samples=n,
+            delta_f=df,
         )
 
         centre = n // 2 + jnp.round(delay * rate).astype(jnp.int64)
