@@ -4,12 +4,10 @@ Simulated sky-distance posteriors with BAYESTAR for arbitrary detector networks.
 
 Given a population of compact binaries and a detector network, `injstar`
 simulates each detector's matched-filter SNR time series and runs BAYESTAR on
-the detected events. The design is described in
-[docs/design.md](docs/design.md).
+the detected events.
 
 The pipeline runs end to end, but its statistical calibration has not been
-done: no coverage test and no high-SNR validation (see the design's "High-SNR
-behaviour") has been run yet.
+done: no coverage test and no high-SNR validation has been run yet.
 
 ## Setup
 

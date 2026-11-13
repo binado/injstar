@@ -10,8 +10,7 @@ and arrival times are centred on their mean weighted by the inverse timing
 variance, and the series are trimmed to the light-travel time across the
 network plus 5 ms (or a quarter autocorrelation period if that is longer).
 
-Design: "BAYESTAR numerical interface" in docs/design.md; the audited
-signature is in docs/audit.md. Nothing here imports JAX.
+Nothing here imports JAX.
 """
 
 import os

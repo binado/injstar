@@ -16,7 +16,7 @@ in radians.
 No SNR or detection column is read: every other column is carried through
 unchanged under a ``population_`` prefix.
 
-Design: "Inputs" in docs/design.md. Nothing here imports JAX.
+Nothing here imports JAX.
 """
 
 from pathlib import Path

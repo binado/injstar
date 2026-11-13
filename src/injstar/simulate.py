@@ -30,8 +30,6 @@ The matched-filter quantities are the pure functions of
 :mod:`injstar.matched_filter`. Times are offsets from each event's geocentric
 coalescence time. JAX must run in 64-bit mode: call
 :func:`injstar.runtime.configure_runtime` first.
-
-Design: "SNR-level simulation" in docs/design.md.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
