@@ -217,6 +217,13 @@ untested and is part of this gate. The sky sampling does not adapt to SNR either
   the finest level, covering about 2.5 deg^2. This limits only the best-localised
   events.
 
+Status (zero-noise probe, one source; details in [audit.md](audit.md)): sky area
+scales as SNR^-2 up to 1000, and the SNR-series sample rate must be raised to
+16384 Hz for the sky position to be unbiased there. BAYESTAR's per-pixel distance
+moments fail for part of the sky probability from about SNR 400 (8%), reaching
+52% at 1000. injstar excludes those pixels and reports `distance_lost_prob`; the
+share of sources above SNR 400 in a realistic population is still to be measured.
+
 Test: one source in ET+2CE at network SNR 10, 30, 100, 300 and 1000, many noise
 realisations each. Pass if `A90` scales as SNR^-2 and the truth falls inside
 credible regions at the nominal rate. If it fails, try higher sample rates first;

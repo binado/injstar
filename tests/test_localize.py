@@ -79,4 +79,5 @@ def test_zero_noise_map_contains_the_truth(
     assert statistics["searched_prob"] < 0.5
     assert statistics["searched_area"] < statistics["area_90"]
     assert statistics["distance_q05"] < 1500.0 < statistics["distance_q95"]
+    assert 0.0 <= statistics["distance_lost_prob"] < 0.05
     assert statistics["log_bsn"] > 100

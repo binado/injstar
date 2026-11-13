@@ -214,8 +214,13 @@ def localize_event(event: Event, network: Network) -> Table:
     skymap["DISTMU"], skymap["DISTSIGMA"], skymap["DISTNORM"] = (
         distance.moments_to_parameters(distmean, diststd)
     )
+    # Pixels whose distance moments BAYESTAR could not evaluate are left out and
+    # the rest renormalised; ligo.skymap's own postprocessing does not
+    # renormalise, which biases the mean low when the excluded pixels hold
+    # probability (see products.map_statistics).
     good = np.isfinite(distmean) & np.isfinite(diststd)
     prob = (moc.uniq2pixarea(skymap["UNIQ"]) * skymap["PROBDENSITY"])[good]
+    prob = prob / prob.sum() if prob.sum() > 0 else prob
     rbar = (prob * distmean[good]).sum()
     r2bar = (prob * (np.square(diststd[good]) + np.square(distmean[good]))).sum()
 
