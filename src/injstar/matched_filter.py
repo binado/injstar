@@ -198,17 +198,19 @@ def matched_filter_snr_series(
 ) -> jax.Array:
     r"""Complex matched-filter SNR time series on a periodic segment.
 
-    Correlates the data with the unit-norm template at every lag with one
-    inverse FFT over the segment's frequency grid; see the module docstring
-    for the formula. The grid follows from the sampling frequency and the
-    segment duration, and the arrays cover the bins of :func:`band_bins`.
+    Correlates the data with the template at every lag with one inverse FFT
+    over the segment's frequency grid; see the module docstring for the formula.
+    The template must have unit norm, ``<template, template> = 1``; divide it by
+    :func:`optimal_snr` first. The grid follows from the sampling frequency and
+    the segment duration, and the arrays cover the bins of :func:`band_bins`.
 
     Parameters
     ----------
     data
         Frequency-domain data on the band's bins, shape ``(detectors, bins)``.
     template
-        Template on the same bins, shape ``(bins,)`` or ``(detectors, bins)``.
+        Unit-norm template on the same bins, shape ``(bins,)`` or
+        ``(detectors, bins)``.
     inverse_psd
         ``1 / S_n`` on the same bins, shape ``(detectors, bins)``; zero where
         undefined.
@@ -224,8 +226,7 @@ def matched_filter_snr_series(
     jax.Array
         Complex SNR series, shape ``(detectors, n_samples)`` with
         ``n_samples = round(sampling_frequency * segment_duration)``; sample
-        ``m`` is at time ``m / sampling_frequency``, periodic in the segment. It
-        is zero for a detector whose template has no weight.
+        ``m`` is at time ``m / sampling_frequency``, periodic in the segment.
 
     Raises
     ------
@@ -247,16 +248,7 @@ def matched_filter_snr_series(
             raise ValueError(
                 f"{name} has {array.shape[-1]} bins but the band holds {len(bins)}"
             )
-    sigma = optimal_snr(template, inverse_psd=inverse_psd, delta_f=delta_f)
-    safe_sigma = jnp.where(sigma > 0, sigma, 1.0)
-    spectrum = (
-        4
-        * delta_f
-        * data
-        * jnp.conj(template)
-        * inverse_psd
-        / jnp.expand_dims(safe_sigma, -1)
-    )
+    spectrum = 4 * delta_f * data * jnp.conj(template) * inverse_psd
     full = jnp.zeros((*spectrum.shape[:-1], n_samples), dtype=spectrum.dtype)
     full = full.at[..., bins].set(spectrum)
     return n_samples * jnp.fft.ifft(full, axis=-1)

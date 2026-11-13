@@ -146,10 +146,9 @@ def greenwich_sidereal_time(gps_times: NDArray[np.float64]) -> NDArray[np.float6
 
 
 def _signal_spectrum(
-    template: jax.Array,
+    unit_template: jax.Array,
     *,
     rho: jax.Array,
-    sigma: jax.Array,
     peak_time: jax.Array,
     frequencies: jax.Array,
 ) -> jax.Array:
@@ -158,9 +157,8 @@ def _signal_spectrum(
     Matched-filtering it against the unit-norm template gives ``rho`` at
     ``peak_time``. Shape ``(detectors, bins)``.
     """
-    scale = rho / jnp.where(sigma > 0, sigma, 1.0)
     phase = -2 * jnp.pi * frequencies * peak_time[:, None]
-    return scale[:, None] * template * (jnp.cos(phase) + 1j * jnp.sin(phase))
+    return rho[:, None] * unit_template * (jnp.cos(phase) + 1j * jnp.sin(phase))
 
 
 def _noise_spectrum(
@@ -393,12 +391,9 @@ class Simulator:
 
         # The geocentric time sits on sample n // 2 of the periodic segment.
         peak_time = (n // 2) / rate + delay
+        unit_template = amplitude / jnp.where(sigma > 0, sigma, 1.0)[:, None]
         data = _signal_spectrum(
-            amplitude,
-            rho=rho,
-            sigma=sigma,
-            peak_time=peak_time,
-            frequencies=frequencies,
+            unit_template, rho=rho, peak_time=peak_time, frequencies=frequencies
         )
         if self.noise:
             # The key depends only on the root key and the 64-bit event id.
@@ -412,7 +407,7 @@ class Simulator:
             )
         series = matched_filter.matched_filter_snr_series(
             data,
-            amplitude,
+            unit_template,
             inverse_psd=inverse_psd,
             minimum_frequency=self.minimum_frequency,
             maximum_frequency=self.maximum_frequency,
