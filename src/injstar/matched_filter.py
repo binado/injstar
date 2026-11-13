@@ -200,17 +200,17 @@ def matched_filter_snr_series(
 
     Correlates the data with the template at every lag with one inverse FFT
     over the segment's frequency grid; see the module docstring for the formula.
-    The template must have unit norm, ``<template, template> = 1``; divide it by
-    :func:`optimal_snr` first. The grid follows from the sampling frequency and
-    the segment duration, and the arrays cover the bins of :func:`band_bins`.
+    The template is not normalised: the series scales with its norm. For an SNR,
+    divide the template by :func:`optimal_snr` first. The grid follows from the
+    sampling frequency and the segment duration, and the arrays cover the bins of
+    :func:`band_bins`.
 
     Parameters
     ----------
     data
         Frequency-domain data on the band's bins, shape ``(detectors, bins)``.
     template
-        Unit-norm template on the same bins, shape ``(bins,)`` or
-        ``(detectors, bins)``.
+        Template on the same bins, shape ``(bins,)`` or ``(detectors, bins)``.
     inverse_psd
         ``1 / S_n`` on the same bins, shape ``(detectors, bins)``; zero where
         undefined.
