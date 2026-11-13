@@ -33,7 +33,7 @@ def repeat(
 def test_zero_noise_peak_is_the_expected_snr(
     tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
 ) -> None:
-    simulator = Simulator(make_config(tmp_path, noise=False), registry)
+    simulator = Simulator.from_config(make_config(tmp_path, noise=False), registry)
 
     result = simulator.series(events)
 
@@ -45,14 +45,14 @@ def test_zero_noise_peak_is_the_expected_snr(
     np.testing.assert_allclose(
         np.abs(result.series[..., centre]), scalars.observed_snr, rtol=1e-12
     )
-    assert result.series.shape == (3, 3, simulator.config.crop_samples)
+    assert result.series.shape == (3, 3, simulator.crop_samples)
 
 
 def test_centre_sample_tracks_the_arrival_time(
     tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
 ) -> None:
     config = make_config(tmp_path, noise=False)
-    result = Simulator(config, registry).series(events)
+    result = Simulator.from_config(config, registry).series(events)
 
     centre_time = result.epochs + (config.crop_samples // 2) / config.sample_rate
     for index, name in enumerate(("H1", "L1", "V1")):
@@ -66,7 +66,7 @@ def test_centre_sample_tracks_the_arrival_time(
 def test_horizon_matches_lal_amplitude(
     tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
 ) -> None:
-    simulator = Simulator(make_config(tmp_path, noise=False), registry)
+    simulator = Simulator.from_config(make_config(tmp_path, noise=False), registry)
     horizon = simulator.snr(events).horizon[0, 0]
 
     plus, _ = lalsimulation.SimInspiralChooseFDWaveform(
@@ -87,10 +87,12 @@ def test_noise_has_unit_variance_per_quadrature(
     tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
 ) -> None:
     many = repeat(events, 0, 400)
-    clean = Simulator(make_config(tmp_path, noise=False), registry).series(
+    clean = Simulator.from_config(make_config(tmp_path, noise=False), registry).series(
         repeat(events, 0, 1)
     )
-    noisy = Simulator(make_config(tmp_path, batch_size=100), registry).series(many)
+    noisy = Simulator.from_config(
+        make_config(tmp_path, batch_size=100), registry
+    ).series(many)
 
     residual = noisy.series - clean.series[0]
     centre = residual.shape[-1] // 2
@@ -106,10 +108,12 @@ def test_results_do_not_depend_on_batching_or_order(
 ) -> None:
     many = repeat(events, 0, 7)
     order = np.array([3, 0, 6, 1, 5, 2, 4])
-    reference = Simulator(make_config(tmp_path, batch_size=7), registry).series(many)
-    shuffled = Simulator(make_config(tmp_path, batch_size=3), registry).series(
-        {name: values[order] for name, values in many.items()}
-    )
+    reference = Simulator.from_config(
+        make_config(tmp_path, batch_size=7), registry
+    ).series(many)
+    shuffled = Simulator.from_config(
+        make_config(tmp_path, batch_size=3), registry
+    ).series({name: values[order] for name, values in many.items()})
 
     np.testing.assert_allclose(
         shuffled.series, reference.series[order], rtol=0, atol=1e-10
@@ -122,8 +126,8 @@ def test_results_do_not_depend_on_batching_or_order(
 def test_seed_changes_the_noise(
     tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
 ) -> None:
-    first = Simulator(make_config(tmp_path, seed=1), registry).snr(events)
-    second = Simulator(make_config(tmp_path, seed=2), registry).snr(events)
+    first = Simulator.from_config(make_config(tmp_path, seed=1), registry).snr(events)
+    second = Simulator.from_config(make_config(tmp_path, seed=2), registry).snr(events)
 
     assert not np.allclose(first.observed_snr, second.observed_snr)
     np.testing.assert_array_equal(first.expected_snr, second.expected_snr)
@@ -132,7 +136,7 @@ def test_seed_changes_the_noise(
 def test_detection_rule(
     tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
 ) -> None:
-    result = Simulator(make_config(tmp_path), registry).snr(events)
+    result = Simulator.from_config(make_config(tmp_path), registry).snr(events)
 
     # Loud, far too distant, and a nearby binary neutron star.
     np.testing.assert_array_equal(result.detected, [True, False, True])

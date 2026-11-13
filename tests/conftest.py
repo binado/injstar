@@ -70,7 +70,7 @@ def event_and_network(
     events = simulation_events(
         population, greenwich_sidereal_time(population["coa_time"])
     )
-    drawn = Simulator(config, registry).series(
+    drawn = Simulator.from_config(config, registry).series(
         {name: values[:1] for name, values in events.items()}
     )
     names, responses, locations = registry.arrays(config.network)

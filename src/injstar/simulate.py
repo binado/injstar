@@ -34,6 +34,7 @@ Design: "SNR-level simulation" in docs/design.md.
 
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Self
 
 import jax
 import jax.numpy as jnp
@@ -144,39 +145,78 @@ def greenwich_sidereal_time(gps_times: NDArray[np.float64]) -> NDArray[np.float6
 
 
 class Simulator:
-    """SNR-level simulator for one network and one run configuration.
+    """SNR-level simulator for one network and one band.
+
+    Build it from a run configuration with :meth:`from_config`.
 
     Parameters
     ----------
-    config
-        Run configuration: band, sampling, detection rule, seed, batch size.
-    registry
-        Detector registry holding the configured network.
+    names
+        Detector names.
+    responses
+        Earth-fixed response tensors, shape ``(detectors, 3, 3)``.
+    locations
+        Earth-fixed positions in metres, shape ``(detectors, 3)``.
+    psd
+        One-sided PSD of each detector at ``bins * delta_f``, shape
+        ``(detectors, len(bins))``; non-finite where it is undefined.
+    bins
+        Indices, in the periodic window's frequency grid, of the band's bins.
+    n_samples
+        Samples in the periodic window.
+    delta_f
+        Frequency spacing of the window in Hz.
+    sample_rate
+        Sample rate of the SNR series in Hz.
+    crop_samples
+        Odd number of samples in the cropped SNR series.
+    waveform
+        Waveform model providing the template amplitude.
+    detector_snr, network_snr, min_detectors
+        Detection rule: at least ``min_detectors`` detectors reach
+        ``detector_snr`` and the network SNR reaches ``network_snr``.
+    noise
+        Whether to add Gaussian noise to the SNR series.
+    seed
+        Seed of the noise.
+    batch_size
+        Events simulated per jitted call.
     """
 
-    def __init__(self, config: RunConfig, registry: DetectorRegistry) -> None:
+    def __init__(
+        self,
+        *,
+        names: Sequence[str],
+        responses: NDArray[np.float64],
+        locations: NDArray[np.float64],
+        psd: NDArray[np.float64],
+        bins: NDArray[np.int_],
+        n_samples: int,
+        delta_f: float,
+        sample_rate: float,
+        crop_samples: int,
+        waveform: ripplegw.AmplitudePhaseWaveform,
+        detector_snr: float,
+        network_snr: float,
+        min_detectors: int,
+        noise: bool,
+        seed: int,
+        batch_size: int,
+    ) -> None:
         if not jax.config.jax_enable_x64:
             raise RuntimeError(
                 "JAX must run in 64-bit mode; call injstar.runtime.configure_runtime()"
             )
-        self.config = config
-        self.names, responses, locations = registry.arrays(config.network)
+        self.names = tuple(names)
+        self.n_samples = n_samples
+        self.delta_f = delta_f
+        self.sample_rate = sample_rate
+        self.crop_samples = crop_samples
+        self.noise = noise
+        self.batch_size = batch_size
+        self._bins = np.asarray(bins)
+        self.frequencies = self._bins * delta_f
 
-        self.n_samples = config.window_samples
-        self.delta_f = 1.0 / config.window_duration
-        first = int(np.ceil(config.f_low / self.delta_f))
-        last = min(int(np.floor(config.f_high / self.delta_f)), self.n_samples // 2 - 1)
-        if last - first < 2:
-            raise ValueError("the frequency band holds fewer than three bins")
-        self._bins = np.arange(first, last + 1)
-        self.frequencies = self._bins * self.delta_f
-
-        psd = np.stack(
-            [
-                registry.detectors[name].sensitivity(self.frequencies)
-                for name in self.names
-            ]
-        )
         self._inverse_psd = np.where(np.isfinite(psd), 1.0 / psd, 0.0)
         empty = [
             name
@@ -188,22 +228,74 @@ class Simulator:
 
         self._responses = responses
         self._locations = locations
-        self._half = config.crop_samples // 2
+        self._half = crop_samples // 2
+        self._waveform = waveform
+        self._detector_snr = detector_snr
+        self._network_snr = network_snr
+        self._min_detectors = min_detectors
+        self._root = jax.random.key(seed)
+        self._batched = jax.jit(jax.vmap(self._event))
+
+    @classmethod
+    def from_config(cls, config: RunConfig, registry: DetectorRegistry) -> Self:
+        """Build the simulator for a run configuration.
+
+        Parameters
+        ----------
+        config
+            Run configuration: band, sampling, detection rule, seed, batch size.
+        registry
+            Detector registry holding the configured network.
+
+        Raises
+        ------
+        ValueError
+            If the band holds fewer than three bins, the waveform model does not
+            expose an amplitude, or a detector's PSD does not cover the band.
+        """
+        names, responses, locations = registry.arrays(config.network)
+
+        n_samples = config.window_samples
+        delta_f = 1.0 / config.window_duration
+        first = int(np.ceil(config.f_low / delta_f))
+        last = min(int(np.floor(config.f_high / delta_f)), n_samples // 2 - 1)
+        if last - first < 2:
+            raise ValueError("the frequency band holds fewer than three bins")
+        bins = np.arange(first, last + 1)
+        frequencies = bins * delta_f
+        psd = np.stack(
+            [registry.detectors[name].sensitivity(frequencies) for name in names]
+        )
+
         waveform = ripplegw.waveform(config.waveform.model, f_ref=config.waveform.f_ref)
         if not isinstance(waveform, ripplegw.AmplitudePhaseWaveform):
             raise ValueError(
                 f"waveform {config.waveform.model!r} does not expose an amplitude"
             )
-        self._waveform = waveform
-        self._root = jax.random.key(config.seed)
-        self._batched = jax.jit(jax.vmap(self._event))
+        return cls(
+            names=names,
+            responses=responses,
+            locations=locations,
+            psd=psd,
+            bins=bins,
+            n_samples=n_samples,
+            delta_f=delta_f,
+            sample_rate=config.sample_rate,
+            crop_samples=config.crop_samples,
+            waveform=waveform,
+            detector_snr=config.detection.detector_snr,
+            network_snr=config.detection.network_snr,
+            min_detectors=config.detection.min_detectors,
+            noise=config.noise,
+            seed=config.seed,
+            batch_size=config.batch_size,
+        )
 
     def _event(self, event: Mapping[str, jax.Array]) -> dict[str, jax.Array]:
         """Simulate one event; every output leads with the detector axis."""
-        config = self.config
         frequencies = jnp.asarray(self.frequencies)
         inverse_psd = jnp.asarray(self._inverse_psd)
-        n, df, rate = self.n_samples, self.delta_f, config.sample_rate
+        n, df, rate = self.n_samples, self.delta_f, self.sample_rate
 
         amplitude = self._waveform.amplitude(
             frequencies,
@@ -260,7 +352,7 @@ class Simulator:
             * rho[:, None]
             * (jnp.cos(phase) + 1j * jnp.sin(phase))
         )
-        if config.noise:
+        if self.noise:
             # The key depends only on the root key and the 64-bit event id.
             event_id = event["event_id"]
             high = (event_id >> 32).astype(jnp.uint32)
@@ -284,10 +376,9 @@ class Simulator:
         crop = jnp.take_along_axis(series, centre[:, None] + offsets, axis=-1)
         observed = jnp.max(jnp.abs(crop), axis=-1)
         network = jnp.sqrt(jnp.sum(observed**2))
-        detection = config.detection
-        detected = (
-            jnp.sum(observed >= detection.detector_snr) >= detection.min_detectors
-        ) & (network >= detection.network_snr)
+        detected = (jnp.sum(observed >= self._detector_snr) >= self._min_detectors) & (
+            network >= self._network_snr
+        )
 
         return {
             "expected_snr": jnp.abs(rho),
@@ -308,7 +399,7 @@ class Simulator:
         if missing:
             raise KeyError(f"events lack the fields {missing}")
         count = len(events["event_id"])
-        size = self.config.batch_size
+        size = self.batch_size
         for start in range(0, count, size):
             index = np.minimum(np.arange(start, start + size), count - 1)
             batch = {
