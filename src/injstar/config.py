@@ -8,8 +8,8 @@ Example::
     network = ["H1", "L1", "V1"]
     population = "population.csv"
     output_dir = "out"
-    f_low = 20.0
-    f_high = 1024.0
+    minimum_frequency = 20.0
+    maximum_frequency = 1024.0
 
     [prior]
     max_distance = 2000.0
@@ -25,15 +25,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 Positive = Annotated[float, Field(gt=0)]
-
-
-class WaveformConfig(BaseModel):
-    """Waveform model used for the template amplitude."""
-
-    model_config = _STRICT
-
-    model: str = "IMRPhenomD"
-    f_ref: Positive = 20.0
 
 
 class DetectionConfig(BaseModel):
@@ -84,12 +75,12 @@ class RunConfig(BaseModel):
         Population file (CSV or HDF5).
     output_dir
         Run directory.
-    f_low, f_high
+    minimum_frequency, maximum_frequency
         Frequency band of the matched filter in Hz.
-    sample_rate
+    sampling_frequency
         Sample rate of the SNR time series in Hz.
-    window_duration
-        Length in seconds of the periodic window the SNR series is drawn on;
+    segment_duration
+        Length in seconds of the periodic segment the SNR series is drawn on;
         the frequency resolution is its inverse. Must be long enough for the
         template autocorrelation to decay.
     crop_duration
@@ -108,11 +99,12 @@ class RunConfig(BaseModel):
     population: Path
     output_dir: Path
 
-    waveform: WaveformConfig = WaveformConfig()
-    f_low: Positive = 20.0
-    f_high: Positive = 1024.0
-    sample_rate: Positive = 4096.0
-    window_duration: Positive = 8.0
+    waveform_approximant: str = "IMRPhenomD"
+    reference_frequency: Positive = 20.0
+    minimum_frequency: Positive = 20.0
+    maximum_frequency: Positive = 1024.0
+    sampling_frequency: Positive = 4096.0
+    segment_duration: Positive = 8.0
     crop_duration: Positive = 0.1
     noise: bool = True
 
@@ -128,30 +120,30 @@ class RunConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate(self) -> Self:
-        if self.f_high <= self.f_low:
-            raise ValueError("f_high must exceed f_low")
-        if self.f_high > self.sample_rate / 2:
-            raise ValueError("f_high must not exceed sample_rate / 2")
-        samples = self.sample_rate * self.window_duration
+        if self.maximum_frequency <= self.minimum_frequency:
+            raise ValueError("maximum_frequency must exceed minimum_frequency")
+        if self.maximum_frequency > self.sampling_frequency / 2:
+            raise ValueError("maximum_frequency must not exceed sampling_frequency / 2")
+        samples = self.sampling_frequency * self.segment_duration
         if abs(samples - round(samples)) > 1e-9 or round(samples) % 2:
             raise ValueError(
-                "sample_rate * window_duration must be an even whole number of samples"
+                "sampling_frequency * segment_duration must be an even whole number of samples"
             )
-        if self.crop_duration >= self.window_duration / 2:
-            raise ValueError("crop_duration must be under half of window_duration")
+        if self.crop_duration >= self.segment_duration / 2:
+            raise ValueError("crop_duration must be under half of segment_duration")
         if self.crop_samples < 3:
             raise ValueError("crop_duration spans fewer than three samples")
         return self
 
     @property
-    def window_samples(self) -> int:
-        """Number of samples in the periodic window."""
-        return round(self.sample_rate * self.window_duration)
+    def segment_samples(self) -> int:
+        """Number of samples in the periodic segment."""
+        return round(self.sampling_frequency * self.segment_duration)
 
     @property
     def crop_samples(self) -> int:
         """Odd number of samples in the cropped SNR series."""
-        return 2 * int(self.crop_duration * self.sample_rate / 2) + 1
+        return 2 * int(self.crop_duration * self.sampling_frequency / 2) + 1
 
     def to_toml(self) -> str:
         """Serialize to TOML that :func:`load_run_config` reads back."""

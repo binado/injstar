@@ -78,7 +78,7 @@ class Reference:
     """Output of ``bayestar.condition``."""
 
     epoch: lal.LIGOTimeGPS
-    sample_rate: float
+    sampling_frequency: float
     toas: NDArray[np.float64]
     snrs: NDArray[np.float64]
     responses: NDArray[np.float64]
@@ -92,7 +92,7 @@ def reference(
 ) -> Reference:
     event, network = event_and_network
     singles = [
-        _Single(name, event, index, _psd(registry, name), network.sample_rate)
+        _Single(name, event, index, _psd(registry, name), network.sampling_frequency)
         for index, name in enumerate(network.names)
     ]
     return Reference(

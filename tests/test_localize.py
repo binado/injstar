@@ -14,7 +14,7 @@ def test_localize_event_rejects_a_short_series(
         event.event_id,
         event.coa_time,
         event.series[:, 180:225],
-        event.epochs + 180 / network.sample_rate,
+        event.epochs + 180 / network.sampling_frequency,
         event.snr,
         event.bandwidth,
         event.horizon,

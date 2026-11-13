@@ -34,8 +34,8 @@ network = ["H1", "L1", "V1"]     # detector names, or a name from [networks]
 population = "population.csv"    # CSV or HDF5, gwmock-pop layout
 output_dir = "out"
 
-f_low = 20.0
-f_high = 1024.0
+minimum_frequency = 20.0
+maximum_frequency = 1024.0
 
 [prior]
 max_distance = 5000.0            # Mpc, required

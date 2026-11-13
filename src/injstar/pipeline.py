@@ -277,7 +277,7 @@ def run(config: RunConfig, *, overwrite: bool = False, resume: bool = False) -> 
             names=names,
             responses=responses,
             locations=locations,
-            sample_rate=config.sample_rate,
+            sampling_frequency=config.sampling_frequency,
             prior=config.prior,
             rescale_loglikelihood=config.rescale_loglikelihood,
         )

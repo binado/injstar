@@ -54,13 +54,15 @@ def test_centre_sample_tracks_the_arrival_time(
     config = make_config(tmp_path, noise=False)
     result = Simulator.from_config(config, registry).series(events)
 
-    centre_time = result.epochs + (config.crop_samples // 2) / config.sample_rate
+    centre_time = result.epochs + (config.crop_samples // 2) / config.sampling_frequency
     for index, name in enumerate(("H1", "L1", "V1")):
         location = registry.detectors[name].geometry.location
         delay = lal.TimeDelayFromEarthCenter(
             location, 1.2, -0.4, lal.LIGOTimeGPS(1400000000)
         )
-        assert abs(centre_time[0, index] - delay) <= 0.5 / config.sample_rate + 1e-9
+        assert (
+            abs(centre_time[0, index] - delay) <= 0.5 / config.sampling_frequency + 1e-9
+        )
 
 
 def test_horizon_matches_lal_amplitude(

@@ -42,7 +42,7 @@ def config_file(tmp_path: Path, population_csv: Path) -> Path:
         'network = ["H1", "L1", "V1"]\n'
         f'population = "{population_csv.name}"\n'
         'output_dir = "out"\n'
-        "window_duration = 4.0\n"
+        "segment_duration = 4.0\n"
         "batch_size = 2\n"
         "[prior]\n"
         "max_distance = 5000.0\n"
@@ -55,7 +55,7 @@ def make_config(tmp_path: Path, **fields: object) -> RunConfig:
         "network": ("H1", "L1", "V1"),
         "population": tmp_path / "population.csv",
         "output_dir": tmp_path / "out",
-        "window_duration": 4.0,
+        "segment_duration": 4.0,
         "prior": {"max_distance": 5000.0},
     }
     return RunConfig.model_validate(defaults | fields)
@@ -84,6 +84,6 @@ def event_and_network(
         horizon=drawn.scalars.horizon[0],
     )
     network = Network(
-        names, responses, locations, config.sample_rate, config.prior, 1.0
+        names, responses, locations, config.sampling_frequency, config.prior, 1.0
     )
     return event, network
