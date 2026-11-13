@@ -1,4 +1,4 @@
-# Detector geometry in astrogwb DetectorGeometry fields (radians, metres).
+# Detector geometry in DetectorGeometry fields (radians, metres).
 # Azimuths are clockwise from North. Original azimuths below were
 # counter-clockwise from East: a_gwmock = (pi/2 - radians(a_old)) mod 2pi.
 # Explicit paper sites and orientations; no upstream preset substitution.

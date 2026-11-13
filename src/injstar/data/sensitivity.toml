@@ -3,7 +3,7 @@
 # a CustomDetector spec matches on its .name.
 #
 # psd_reference may be a gwmock-noise bundled preset (e.g. "ET_D_psd"), a
-# file in astrogwb's noise_curves/ directory, an absolute path, or a URL.
+# file in the packaged noise_curves/ directory, an absolute path, or a URL.
 # LAL/CE/Virgo/KAGRA curves are kept local (not bundled upstream).
 #
 # Out-of-band PSD masking follows each noise curve file's tabulated grid
