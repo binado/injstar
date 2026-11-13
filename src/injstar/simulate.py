@@ -15,12 +15,16 @@ For detector :math:`j`, with :math:`|h(f)|` the face-on amplitude at 1 Mpc and
 .. math::
 
     \rho_j = \frac{\mathrm{horizon}_j}{d_L}
-    \left[ F_+ \frac{1 + \cos^2 \iota}{2} + i \, F_\times \cos \iota \right]
+    \left[ F_+ \frac{1 + \cos^2 \iota}{2} - i \, F_\times \cos \iota \right]
 
 .. math::
 
     z_j(t) = \rho_j \, A_j(t - t_j) + n_j(t), \qquad
     \langle n \, n^* \rangle = 2 A_j
+
+The sign of the cross term is BAYESTAR's signal model
+(``bayestar_signal_amplitude_model`` in ligo.skymap), which ripple's
+:math:`h_\times = -i \cos\iota \, h_+` also gives.
 
 The rectangle sum is used for :math:`\sigma_j` so that :math:`A_j(0) = 1` exactly
 on the grid; ligo.skymap's own horizon uses a trapezoid rule, which differs only by
@@ -386,7 +390,7 @@ class Simulator:
 
         cos_inclination = jnp.cos(event["inclination"])
         rho = (sigma / event["luminosity_distance"]) * (
-            0.5 * (1 + cos_inclination**2) * plus + 1j * cos_inclination * cross
+            0.5 * (1 + cos_inclination**2) * plus - 1j * cos_inclination * cross
         )
 
         # The geocentric time sits on sample n // 2 of the periodic segment.
