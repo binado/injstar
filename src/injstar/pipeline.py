@@ -25,8 +25,8 @@ import numpy as np
 from injstar import products
 from injstar.config import RunConfig, dump_toml, load_run_config
 from injstar.detector.network import DetectorRegistry, load_detector_config
+from injstar.detector.psd import resolve_psd_path
 from injstar.population import Population, read_population, simulation_events
-from injstar.psd import resolve_psd_path
 from injstar.runtime import configure_runtime, set_cpu_threads
 
 logger = logging.getLogger(__name__)

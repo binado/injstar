@@ -38,7 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic.dataclasses import dataclass
 
 from injstar.constants import WGS84_FLATTENING, WGS84_SEMI_MAJOR_AXIS_M
-from injstar.psd import PsdKind, Sensitivity, resolve_psd_path
+from injstar.detector.psd import PsdKind, Sensitivity, resolve_psd_path
 
 #: The packaged detector geometry and sensitivity tables, the first layers of
 #: every merge.
@@ -137,7 +137,7 @@ class DetectorConfig(BaseModel):
 
     @property
     def sensitivity(self) -> Sensitivity:
-        """A fresh :class:`~injstar.psd.Sensitivity` for this detector."""
+        """A fresh :class:`~injstar.detector.psd.Sensitivity` for this detector."""
         return Sensitivity(self.psd_reference, self.psd_kind)
 
 

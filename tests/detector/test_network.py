@@ -10,7 +10,7 @@ from injstar.detector.network import (
     DetectorRegistry,
     load_detector_config,
 )
-from injstar.psd import NOISE_CURVES_BASE_DIR
+from injstar.detector.psd import NOISE_CURVES_BASE_DIR
 
 
 @pytest.mark.parametrize("name", ["H1", "L1", "V1", "K1"])
