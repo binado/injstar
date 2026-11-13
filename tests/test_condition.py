@@ -1,8 +1,8 @@
-"""Compare :func:`injstar.localize.pack` with ``ligo.skymap.bayestar.condition``.
+"""Compare injstar's detector inputs with ``ligo.skymap.bayestar.condition``.
 
-The same zero-noise SNR series is handed to both. They differ only where the
-inputs differ: injstar's response tensors are geodetic where LAL's are
-tabulated, and its horizon and bandwidth come from ripplegw's IMRPhenomD where
+The same zero-noise SNR series is handed to ``condition``. The outputs differ
+only where the inputs differ: injstar's response tensors are geodetic where
+LAL's are tabulated, and its horizon comes from ripplegw's IMRPhenomD where
 ``condition`` integrates LAL's.
 """
 
@@ -16,7 +16,7 @@ from ligo.skymap.io import events
 from numpy.typing import NDArray
 
 from injstar.detector.network import DetectorRegistry
-from injstar.localize import Event, Network, Packed, pack
+from injstar.localize import Event, Network
 
 PSD_DELTA_F = 0.25
 PSD_F_MAX = 2048.0
@@ -102,42 +102,6 @@ def reference(
     )
 
 
-@pytest.fixture
-def packed(event_and_network: tuple[Event, Network]) -> Packed:
-    return pack(*event_and_network)
-
-
-def test_pack_gives_bayestar_sample_rate_and_shape(
-    packed: Packed, reference: Reference, event_and_network: tuple[Event, Network]
-) -> None:
-    assert event_and_network[1].sample_rate == reference.sample_rate
-    assert packed.snrs.shape == reference.snrs.shape
-
-
-def test_pack_gives_bayestar_epoch_and_gmst(
-    packed: Packed, reference: Reference
-) -> None:
-    # The epochs differ through the timing weights, which use independent
-    # bandwidths; the reference also averages in integer nanoseconds.
-    assert float(reference.epoch - packed.epoch) == pytest.approx(0.0, abs=1e-6)
-    assert packed.gmst == pytest.approx(
-        lal.GreenwichMeanSiderealTime(reference.epoch), abs=1e-9
-    )
-
-
-def test_pack_gives_bayestar_arrival_times_to_a_fraction_of_a_sample(
-    packed: Packed, reference: Reference, event_and_network: tuple[Event, Network]
-) -> None:
-    rate = event_and_network[1].sample_rate
-    np.testing.assert_allclose((packed.epochs - reference.toas) * rate, 0.0, atol=2e-3)
-
-
-def test_pack_gives_bayestar_light_travel_times(
-    packed: Packed, reference: Reference
-) -> None:
-    np.testing.assert_allclose(packed.locations, reference.locations, atol=1e-6)
-
-
 def test_geodetic_responses_match_lal_tensors_to_1e_3(
     reference: Reference, event_and_network: tuple[Event, Network]
 ) -> None:
@@ -152,28 +116,4 @@ def test_horizons_match_lal_template_within_half_a_percent(
 ) -> None:
     np.testing.assert_allclose(
         event_and_network[0].horizon, reference.horizons, rtol=5e-3
-    )
-
-
-def test_pack_passes_the_snr_amplitudes_through_to_float32(
-    packed: Packed, reference: Reference
-) -> None:
-    reference_amplitude = reference.snrs[..., 0]
-    np.testing.assert_allclose(
-        packed.snrs[..., 0],
-        reference_amplitude,
-        rtol=0,
-        atol=1e-6 * reference_amplitude.max(),
-    )
-
-
-def test_pack_phases_differ_from_bayestar_by_whole_turns_per_detector(
-    packed: Packed, reference: Reference
-) -> None:
-    # ligo.skymap.bayestar.filter.unwrap flattens the whole array, so phase
-    # continues from one detector into the next; injstar unwraps each row.
-    turns = (reference.snrs[..., 1] - packed.snrs[..., 1]) / (2 * np.pi)
-    np.testing.assert_allclose(turns, np.round(turns), atol=1e-5)
-    np.testing.assert_allclose(
-        turns, np.broadcast_to(turns[:, :1], turns.shape), atol=1e-5
     )
