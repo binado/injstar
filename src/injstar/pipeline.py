@@ -163,7 +163,7 @@ def _simulator(inputs: Inputs):  # noqa: ANN202 - simulate imports JAX
     resolved_config = inputs.config.model_copy(
         update={"network": inputs.registry.members("selected")}
     )
-    return Simulator(resolved_config, inputs.registry), events
+    return Simulator.from_config(resolved_config, inputs.registry), events
 
 
 def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
