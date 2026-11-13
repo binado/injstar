@@ -58,5 +58,6 @@ jobs:
           version: "0.12.18"
       - name: Install the project
         run: uv sync --locked --all-groups
+      # BAYESTAR tests are slow and version-independent, so only the newest Python runs them.
       - name: Run tests
-        run: uv run pytest
+        run: uv run pytest -n auto ${{ matrix.python-version != '3.14' && '-m "not slow"' || '' }}

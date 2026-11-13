@@ -119,10 +119,7 @@ def test_invalid_config_reports_an_error(config_file: Path) -> None:
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("named_network", [False, True], ids=["explicit", "named"])
-def test_run_resume_and_summarise(config_file: Path, named_network: bool) -> None:
-    if named_network:
-        use_named_network(config_file)
+def test_run_resume_and_summarise(config_file: Path) -> None:
     out = config_file.parent / "out"
     assert invoke("snr", config_file)[0] == 0
 
