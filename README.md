@@ -57,7 +57,7 @@ The output directory holds:
 | `injections.h5` | One row per injection: truth, expected and observed SNR per detector, network SNR, `detected`. |
 | `skymaps/<event_id>.multiorder.fits` | BAYESTAR sky map of each detected event. |
 | `summary.h5` | `injections.h5` plus 50% and 90% areas, searched area and probability, distance quantiles, `log_bci`, `log_bsn`. |
-| `config.toml`, `detectors.toml`, `manifest.json` | Resolved inputs, their hashes and software versions. |
+| `config.json` | The run config as validated, with paths made absolute. |
 
 ### Population columns
 
