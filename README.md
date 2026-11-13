@@ -26,8 +26,8 @@ The underlying command is `uv sync --all-groups` if Just is unavailable.
 
 ## Run
 
-A run is one TOML file. This is the packaged reference,
-[src/injstar/data/reference/run.toml](src/injstar/data/reference/run.toml):
+A run is one TOML file. This is the reference config,
+[tests/fixtures/run.toml](tests/fixtures/run.toml):
 
 ```toml
 network = ["H1", "L1", "V1"]     # detector names, or a name from [networks]
@@ -108,16 +108,6 @@ just test-fast  # skip the tests that call BAYESTAR
 just hooks      # uv run prek run --all-files
 just check      # full validation, tests, and package build
 ```
-
-## Update from the template
-
-The template runs `uv lock`, so updates must explicitly trust it:
-
-```console
-uvx copier@9.18.2 update --trust
-just check
-```
-
 
 ## Publishing
 

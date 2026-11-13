@@ -11,3 +11,6 @@ build/
 dist/
 *.egg-info/
 .handoff/
+
+# Design notes (local only)
+docs/
