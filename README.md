@@ -93,9 +93,6 @@ yarm_azimuth_rad = 5.57
 mine = ["X1", "H1", "L1"]
 ```
 
-The detector code and data are ported from
-[astrogwb](https://github.com/binado/astrogwb) and use the same schema.
-
 
 ## Development
 
