@@ -76,7 +76,7 @@ class Network:
         Earth-fixed response tensors, shape ``(detectors, 3, 3)``.
     locations
         Earth-fixed positions in metres, shape ``(detectors, 3)``.
-    sample_rate
+    sampling_frequency
         Sample rate of the SNR series in Hz.
     prior
         Distance prior.
@@ -87,7 +87,7 @@ class Network:
     names: tuple[str, ...]
     responses: NDArray[np.float64]
     locations: NDArray[np.float64]
-    sample_rate: float
+    sampling_frequency: float
     prior: PriorConfig
     rescale_loglikelihood: float
 
@@ -117,7 +117,7 @@ def localize_event(event: Event, network: Network) -> Table:
     """
     # Condition as ``ligo.skymap.bayestar.condition`` does.
     start = time.perf_counter()
-    rate = network.sample_rate
+    rate = network.sampling_frequency
     weights = np.square(event.snr * event.bandwidth)
     if not np.all(np.isfinite(weights)) or weights.sum() <= 0:
         raise ValueError(f"event {event.event_id} has no usable timing weights")
@@ -166,7 +166,7 @@ def localize_event(event: Event, network: Network) -> Table:
         prior.distance_power,
         prior.cosmology,
         gmst,
-        network.sample_rate,
+        network.sampling_frequency,
         first_samples,
         snrs.astype(np.float32),
         np.asarray(network.responses, dtype=np.float32),

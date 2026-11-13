@@ -39,8 +39,11 @@ def test_toml_round_trip(config_file: Path, tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("fields", "message"),
     [
-        ({"f_high": 4096.0}, "sample_rate / 2"),
-        ({"f_low": 2000.0}, "f_high must exceed f_low"),
+        ({"maximum_frequency": 4096.0}, "sampling_frequency / 2"),
+        (
+            {"minimum_frequency": 2000.0},
+            "maximum_frequency must exceed minimum_frequency",
+        ),
         ({"window_duration": 4.0001}, "whole number of samples"),
         ({"crop_duration": 3.0}, "under half"),
         ({"prior": {"max_distance": 10.0, "min_distance": 20.0}}, "max_distance"),

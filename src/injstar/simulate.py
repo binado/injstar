@@ -166,7 +166,7 @@ class Simulator:
         Samples in the periodic window.
     delta_f
         Frequency spacing of the window in Hz.
-    sample_rate
+    sampling_frequency
         Sample rate of the SNR series in Hz.
     crop_samples
         Odd number of samples in the cropped SNR series.
@@ -193,7 +193,7 @@ class Simulator:
         bins: NDArray[np.int_],
         n_samples: int,
         delta_f: float,
-        sample_rate: float,
+        sampling_frequency: float,
         crop_samples: int,
         waveform: ripplegw.AmplitudePhaseWaveform,
         detector_snr: float,
@@ -210,7 +210,7 @@ class Simulator:
         self.names = tuple(names)
         self.n_samples = n_samples
         self.delta_f = delta_f
-        self.sample_rate = sample_rate
+        self.sampling_frequency = sampling_frequency
         self.crop_samples = crop_samples
         self.noise = noise
         self.batch_size = batch_size
@@ -257,8 +257,10 @@ class Simulator:
 
         n_samples = config.window_samples
         delta_f = 1.0 / config.window_duration
-        first = int(np.ceil(config.f_low / delta_f))
-        last = min(int(np.floor(config.f_high / delta_f)), n_samples // 2 - 1)
+        first = int(np.ceil(config.minimum_frequency / delta_f))
+        last = min(
+            int(np.floor(config.maximum_frequency / delta_f)), n_samples // 2 - 1
+        )
         if last - first < 2:
             raise ValueError("the frequency band holds fewer than three bins")
         bins = np.arange(first, last + 1)
@@ -267,10 +269,13 @@ class Simulator:
             [registry.detectors[name].sensitivity(frequencies) for name in names]
         )
 
-        waveform = ripplegw.waveform(config.waveform.model, f_ref=config.waveform.f_ref)
+        waveform = ripplegw.waveform(
+            config.waveform_approximant,
+            f_ref=config.reference_frequency,
+        )
         if not isinstance(waveform, ripplegw.AmplitudePhaseWaveform):
             raise ValueError(
-                f"waveform {config.waveform.model!r} does not expose an amplitude"
+                f"waveform {config.waveform_approximant!r} does not expose an amplitude"
             )
         return cls(
             names=names,
@@ -280,7 +285,7 @@ class Simulator:
             bins=bins,
             n_samples=n_samples,
             delta_f=delta_f,
-            sample_rate=config.sample_rate,
+            sampling_frequency=config.sampling_frequency,
             crop_samples=config.crop_samples,
             waveform=waveform,
             detector_snr=config.detection.detector_snr,
@@ -295,7 +300,7 @@ class Simulator:
         """Simulate one event; every output leads with the detector axis."""
         frequencies = jnp.asarray(self.frequencies)
         inverse_psd = jnp.asarray(self._inverse_psd)
-        n, df, rate = self.n_samples, self.delta_f, self.sample_rate
+        n, df, rate = self.n_samples, self.delta_f, self.sampling_frequency
 
         amplitude = self._waveform.amplitude(
             frequencies,

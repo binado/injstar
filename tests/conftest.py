@@ -84,6 +84,6 @@ def event_and_network(
         horizon=drawn.scalars.horizon[0],
     )
     network = Network(
-        names, responses, locations, config.sample_rate, config.prior, 1.0
+        names, responses, locations, config.sampling_frequency, config.prior, 1.0
     )
     return event, network
