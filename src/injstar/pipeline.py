@@ -4,7 +4,7 @@
 :func:`run` adds one BAYESTAR sky map per detected event and the summary.
 Simulation is deterministic per event, so :func:`run` re-draws the SNR series
 of the events it localizes instead of storing them, and an interrupted run is
-finished by calling it again with ``resume=True``.
+finished by calling it again with the same config and ``resume=True``.
 
 A run directory holds ``config.json``, the :class:`~injstar.config.RunConfig`
 that produced it. A directory is only reused when that config matches the
@@ -201,7 +201,8 @@ def run(config: RunConfig, *, overwrite: bool = False, resume: bool = False) -> 
     overwrite
         Replace an output directory holding a different or finished run.
     resume
-        Continue a directory that already holds sky maps of this run.
+        Continue a directory that already holds sky maps of this run. The
+        directory's recorded config must match ``config``.
 
     Returns
     -------
@@ -213,14 +214,18 @@ def run(config: RunConfig, *, overwrite: bool = False, resume: bool = False) -> 
     RunDirectoryError
         If the output directory holds something else, or sky maps of this run
         when neither ``overwrite`` nor ``resume`` is set.
+    ValueError
+        If both ``overwrite`` and ``resume`` are set.
     """
+    if overwrite and resume:
+        raise ValueError("overwrite and resume are mutually exclusive")
     output_dir = config.output_dir
     skymaps = output_dir / "skymaps"
     compute_snr(config, overwrite=overwrite)
     if skymaps.is_dir() and any(skymaps.iterdir()) and not resume:
         raise RunDirectoryError(
             f"{output_dir} already holds sky maps of this run; "
-            "use `injstar resume` to finish it or --overwrite to redo it"
+            "pass --resume to finish it or --overwrite to redo it"
         )
 
     inputs = load_inputs(config)
@@ -279,33 +284,6 @@ def run(config: RunConfig, *, overwrite: bool = False, resume: bool = False) -> 
                 )
 
     return products.build_summary(output_dir)
-
-
-def resume(output_dir: Path, *, workers: int | None = None) -> Path:
-    """Finish an interrupted run from its directory alone.
-
-    Parameters
-    ----------
-    output_dir
-        Run directory written by :func:`compute_snr` or :func:`run`.
-    workers
-        Worker count replacing the recorded one.
-
-    Raises
-    ------
-    RunDirectoryError
-        If the directory is not a run.
-    """
-    output_dir = Path(output_dir).resolve()
-    snapshot = output_dir / products.CONFIG_FILE
-    if not snapshot.is_file():
-        raise RunDirectoryError(f"{output_dir} is not an injstar run directory")
-    data = json.loads(snapshot.read_text())
-    data["output_dir"] = str(output_dir)
-    if workers is not None:
-        data["workers"] = workers
-    config = RunConfig.model_validate(data)
-    return run(config, resume=True)
 
 
 def summarise(output_dir: Path) -> Path:

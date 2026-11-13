@@ -2,12 +2,13 @@
 
 ``injstar snr CONFIG`` simulates every injection of a population and writes
 their per-detector and network SNRs and detection flags. ``injstar run CONFIG``
-also localizes the detected ones with BAYESTAR. ``injstar resume DIR`` finishes
-an interrupted run and ``injstar summarise DIR`` rebuilds its summary table::
+also localizes the detected ones with BAYESTAR. ``injstar run CONFIG --resume``
+finishes an interrupted run and ``injstar summarise DIR`` rebuilds its summary
+table::
 
     injstar snr run.toml --output-dir out
     injstar run run.toml --output-dir out
-    injstar resume out
+    injstar run run.toml --output-dir out --resume
     injstar summarise out
 
 This module must stay cheap to import: JAX, ligo.skymap and the pipeline are
@@ -50,6 +51,12 @@ OverwriteOption = Annotated[
     bool,
     typer.Option(
         "--overwrite", help="Replace an existing run in the output directory."
+    ),
+]
+ResumeOption = Annotated[
+    bool,
+    typer.Option(
+        "--resume", help="Continue an interrupted run, skipping finished events."
     ),
 ]
 WorkersOption = Annotated[
