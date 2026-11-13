@@ -26,7 +26,9 @@ The rectangle sum is used for :math:`\sigma_j` so that :math:`A_j(0) = 1` exactl
 on the grid; ligo.skymap's own horizon uses a trapezoid rule, which differs only by
 half of the two band-edge bins.
 
-Times are offsets from each event's geocentric coalescence time. JAX must run
+The matched-filter quantities are the pure functions of
+:mod:`injstar.matched_filter`. Times are offsets from each event's geocentric
+coalescence time. JAX must run
 in 64-bit mode: call :func:`injstar.runtime.configure_runtime` first.
 
 Design: "SNR-level simulation" in docs/design.md.
@@ -43,6 +45,7 @@ import numpy as np
 import ripplegw
 from numpy.typing import NDArray
 
+from injstar import matched_filter
 from injstar.config import RunConfig
 from injstar.detector import projection
 from injstar.detector.network import DetectorRegistry
@@ -315,16 +318,12 @@ class Simulator:
             },
         )
         amplitude = jnp.nan_to_num(amplitude, nan=0.0, posinf=0.0, neginf=0.0)
-        power = amplitude**2 * inverse_psd
-        total = jnp.sum(power, axis=-1)
-        safe_total = jnp.where(total > 0, total, 1.0)
-        sigma = jnp.sqrt(4 * df * total)
-        safe_sigma = jnp.where(sigma > 0, sigma, 1.0)
-
-        omega = 2 * jnp.pi * frequencies
-        mean = jnp.sum(omega * power, axis=-1) / safe_total
-        mean_square = jnp.sum(omega**2 * power, axis=-1) / safe_total
-        bandwidth = jnp.sqrt(jnp.maximum(mean_square - mean**2, 0.0))
+        sigma = matched_filter.optimal_snr(amplitude, inverse_psd, df)
+        bandwidth = jnp.sqrt(
+            matched_filter.second_frequency_cumulant(
+                frequencies, amplitude, inverse_psd
+            )
+        )
 
         sky = {
             "right_ascension": event["right_ascension"],
@@ -351,30 +350,18 @@ class Simulator:
 
         # The geocentric time sits on sample n // 2 of the periodic segment.
         peak_time = (n // 2) / rate + delay
-        phase = -2 * jnp.pi * frequencies * peak_time[:, None]
-        spectrum = (
-            (power / safe_total[:, None])
-            * rho[:, None]
-            * (jnp.cos(phase) + 1j * jnp.sin(phase))
-        )
+        white = None
         if self.noise:
             # The key depends only on the root key and the 64-bit event id.
             event_id = event["event_id"]
             high = (event_id >> 32).astype(jnp.uint32)
             low = (event_id & 0xFFFFFFFF).astype(jnp.uint32)
             key = jax.random.fold_in(jax.random.fold_in(self._root, high), low)
-            draw = jax.random.normal(key, (*power.shape, 2))
+            draw = jax.random.normal(key, (*inverse_psd.shape, 2))
             white = draw[..., 0] + 1j * draw[..., 1]
-            spectrum = spectrum + (
-                (2 * jnp.sqrt(df) / safe_sigma)[:, None]
-                * amplitude
-                * jnp.sqrt(inverse_psd)
-                * white
-            )
-
-        full = jnp.zeros((len(self.names), n), dtype=spectrum.dtype)
-        full = full.at[:, jnp.asarray(self._bins)].set(spectrum)
-        series = n * jnp.fft.ifft(full, axis=-1)
+        series = matched_filter.matched_filter_snr_series(
+            amplitude, inverse_psd, rho, peak_time, self._bins, n, df, white
+        )
 
         centre = n // 2 + jnp.round(delay * rate).astype(jnp.int64)
         offsets = jnp.arange(-self._half, self._half + 1)
