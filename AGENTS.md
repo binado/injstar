@@ -16,7 +16,7 @@ just fmt                       # ruff check --fix + ruff format
 just typecheck                 # ty check (covers src and tests)
 just test-fast                 # pytest -m "not slow" (skips BAYESTAR tests, which take ~1 min)
 uv run pytest tests/test_cli.py::test_name   # single test
-just run snr|run|resume|summarise ...        # uv run injstar ...
+just run snr|run|summarise ...        # uv run injstar ...
 ```
 
 A prek pre-commit hook runs ruff and `ty` on the whole tree, so every commit must be a self-consistent tree.

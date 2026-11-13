@@ -143,11 +143,12 @@ def test_run_resume_and_summarise(config_file: Path) -> None:
 
     # A finished directory is not silently redone.
     assert invoke("run", config_file)[0] == 1
+    assert invoke("run", config_file, "--resume", "--overwrite")[0] == 1
 
     kept = (out / "skymaps" / "0.multiorder.fits").stat().st_mtime_ns
     (out / "skymaps" / "2.multiorder.fits").unlink()
     (out / "summary.h5").unlink()
-    code, output = invoke("resume", out)
+    code, output = invoke("run", config_file, "--resume")
 
     assert code == 0, output
     assert (out / "skymaps" / "0.multiorder.fits").stat().st_mtime_ns == kept

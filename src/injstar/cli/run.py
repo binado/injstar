@@ -6,6 +6,7 @@ from injstar.cli._app import (
     ConfigArgument,
     OutputDirOption,
     OverwriteOption,
+    ResumeOption,
     SeedOption,
     WorkersOption,
     _guarded,
@@ -20,6 +21,7 @@ def run(
     workers: WorkersOption = None,
     seed: SeedOption = None,
     overwrite: OverwriteOption = False,
+    resume: ResumeOption = False,
 ) -> None:
     """Simulate and localize a population of injections."""
 
@@ -30,6 +32,6 @@ def run(
         loaded = load_run_config(
             config, output_dir=output_dir, seed=seed, workers=workers
         )
-        typer.echo(pipeline.run(loaded, overwrite=overwrite))
+        typer.echo(pipeline.run(loaded, overwrite=overwrite, resume=resume))
 
     _guarded(stage)

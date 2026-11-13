@@ -42,7 +42,7 @@ max_distance = 5000.0            # Mpc, required
 ```console
 uv run injstar snr run.toml        # SNRs and detection flags only
 uv run injstar run run.toml        # also one BAYESTAR sky map per detection
-uv run injstar resume out          # finish an interrupted run
+uv run injstar run run.toml --resume   # finish an interrupted run
 uv run injstar summarise out       # rebuild summary.h5 from the sky maps
 ```
 
