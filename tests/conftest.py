@@ -3,8 +3,11 @@ from pathlib import Path
 import pytest
 
 from injstar.config import RunConfig
+from injstar.localize import Event, Network
 from injstar.network import DetectorRegistry, load_detector_config
+from injstar.population import read_population, simulation_events
 from injstar.runtime import configure_runtime
+from injstar.simulate import Simulator, greenwich_sidereal_time
 
 # 64-bit JAX has to be chosen before any test touches the backend.
 configure_runtime()
@@ -56,3 +59,31 @@ def make_config(tmp_path: Path, **fields: object) -> RunConfig:
         "prior": {"max_distance": 5000.0},
     }
     return RunConfig.model_validate(defaults | fields)
+
+
+@pytest.fixture
+def event_and_network(
+    tmp_path: Path, registry: DetectorRegistry, population_csv: Path
+) -> tuple[Event, Network]:
+    config = make_config(tmp_path, noise=False)
+    population = read_population(population_csv)
+    events = simulation_events(
+        population, greenwich_sidereal_time(population["coa_time"])
+    )
+    drawn = Simulator(config, registry).series(
+        {name: values[:1] for name, values in events.items()}
+    )
+    names, responses, locations = registry.arrays(config.network)
+    event = Event(
+        event_id=0,
+        coa_time=float(population["coa_time"][0]),
+        series=drawn.series[0],
+        epochs=drawn.epochs[0],
+        snr=drawn.scalars.observed_snr[0],
+        bandwidth=drawn.scalars.bandwidth[0],
+        horizon=drawn.scalars.horizon[0],
+    )
+    network = Network(
+        names, responses, locations, config.sample_rate, config.prior, 1.0
+    )
+    return event, network

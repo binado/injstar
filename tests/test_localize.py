@@ -5,40 +5,7 @@ import numpy as np
 import pytest
 
 from injstar.localize import Event, Network, localize_event, pack
-from injstar.network import DetectorRegistry
-from injstar.population import read_population, simulation_events
 from injstar.products import map_statistics
-from injstar.simulate import Simulator, greenwich_sidereal_time
-
-from .conftest import make_config
-
-
-@pytest.fixture
-def event_and_network(
-    tmp_path: Path, registry: DetectorRegistry, population_csv: Path
-) -> tuple[Event, Network]:
-    config = make_config(tmp_path, noise=False)
-    population = read_population(population_csv)
-    events = simulation_events(
-        population, greenwich_sidereal_time(population["coa_time"])
-    )
-    drawn = Simulator(config, registry).series(
-        {name: values[:1] for name, values in events.items()}
-    )
-    names, responses, locations = registry.arrays(config.network)
-    event = Event(
-        event_id=0,
-        coa_time=float(population["coa_time"][0]),
-        series=drawn.series[0],
-        epochs=drawn.epochs[0],
-        snr=drawn.scalars.observed_snr[0],
-        bandwidth=drawn.scalars.bandwidth[0],
-        horizon=drawn.scalars.horizon[0],
-    )
-    network = Network(
-        names, responses, locations, config.sample_rate, config.prior, 1.0
-    )
-    return event, network
 
 
 def test_pack_follows_bayestar_conditioning(

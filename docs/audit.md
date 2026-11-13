@@ -197,6 +197,22 @@ gwmock-noise 0.23.0.
 - **Horizon sum.** injstar uses a rectangle sum so that the autocorrelation is
   exactly 1 at zero lag on its grid, not the trapezoid rule of
   `SignalModel.get_horizon_distance`.
+- **`pack` against `bayestar.condition`** (`tests/test_condition.py`, zero-noise
+  HLV BBH, same SNR series fed to both, template IMRPhenomD). Agreement:
+  - first-sample times within 2e-3 sample, epoch within 1e-6 s, GMST within
+    1e-9 day (the residuals come from the timing weights, which use independent
+    bandwidths; `condition` also averages in integer nanoseconds);
+  - centred light-travel times within 1e-6 s;
+  - SNR amplitudes within 1e-6 of the peak (float32);
+  - horizons within 0.3% (ripplegw against LAL's IMRPhenomD), responses within
+    3e-4 (geodetic against LAL tensors).
+  - Unwrapped phases differ by a whole number of turns per detector, constant
+    along the series. `ligo.skymap.bayestar.filter.unwrap` masks and flattens
+    its input, so `condition` unwraps across detector boundaries; `pack`
+    unwraps each row. A constant multiple of 2 pi does not change the
+    interpolated phase, so this is cosmetic.
+  - Not covered: the cubic interpolation of arrival times in
+    `bayestar_realize_coincs`, which injstar does not do, and non-zero noise.
 - **Runtime.** One HLV event took about 18 s in `core.toa_phoa_snr` on one
   thread (Apple silicon, one measurement). Simulating three events took 15 ms
   after JIT compilation.
