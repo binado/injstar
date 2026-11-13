@@ -1,0 +1,52 @@
+# Detector sensitivities, keyed by the owned detector name.
+# Packaged names (H1, L1, ...) match directly;
+# a CustomDetector spec matches on its .name.
+#
+# psd_reference may be a gwmock-noise bundled preset (e.g. "ET_D_psd"), a
+# file in the packaged noise_curves/ directory, an absolute path, or a URL.
+# LAL/CE/Virgo/KAGRA curves are kept local (not bundled upstream).
+#
+# Out-of-band PSD masking follows each noise curve file's tabulated grid
+# when the detector's Sensitivity is called.
+
+[detectors.H1]
+psd_reference = "AplusDesign_psd.txt"
+
+[detectors.L1]
+psd_reference = "AplusDesign_psd.txt"
+
+[detectors.V1]
+psd_reference = "avirgo_O5low_NEW_psd.txt"
+
+[detectors.K1]
+psd_reference = "kagra_128Mpc_psd.txt"
+
+# --- Einstein Telescope: triangle (str E1/E2/E3, geometry.toml) ---
+[detectors.E1]
+psd_reference = "ET_COBA_10km_psd.txt"
+
+[detectors.E2]
+psd_reference = "ET_COBA_10km_psd.txt"
+
+[detectors.E3]
+psd_reference = "ET_COBA_10km_psd.txt"
+
+# --- ET L-shaped sites (str S1/S2/R1/R2, geometry.toml) ---
+[detectors.S1]
+psd_reference = "ET_COBA_15km_psd.txt"
+
+[detectors.S2]
+psd_reference = "ET_COBA_15km_psd.txt"
+
+[detectors.R1]
+psd_reference = "ET_COBA_15km_psd.txt"
+
+[detectors.R2]
+psd_reference = "ET_COBA_15km_psd.txt"
+
+# --- Cosmic Explorer (str C1/C2, geometry.toml) ---
+[detectors.C1]
+psd_reference = "cosmic_explorer_strain_psd.txt"
+
+[detectors.C2]
+psd_reference = "cosmic_explorer_strain_psd.txt"

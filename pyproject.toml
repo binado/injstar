@@ -7,14 +7,20 @@ license = "MIT"
 authors = [
     { name = "binado", email = "bernardopveronese@gmail.com" },
 ]
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "astropy>=8.0.2",
+    "gwmock-noise>=0.17.0",
+    "jax>=0.12.0.1",
+    "ligo-skymap>=2.5.4",
+    "pydantic>=2.14.3",
+    "ripplegw>=0.5.1",
+    "typer>=0.29.1",
+]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-
-    "Programming Language :: Python :: 3.11",
 
 
     "Programming Language :: Python :: 3.12",
@@ -35,6 +41,12 @@ Issues = "https://github.com/binado/injstar/issues"
 [project.scripts]
 "injstar" = "injstar.__main__:main"
 
+[project.optional-dependencies]
+validation = [
+    "gwmock-signal>=0.24.0 ; python_full_version >= '3.13'",
+    "pycbc>=2.11.0",
+]
+
 
 [build-system]
 requires = ["uv_build>=0.12.18,<0.13"]
@@ -49,17 +61,24 @@ dev = [
 ]
 test = [
     "pytest>=9.1.1",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
+markers = ["slow: runs BAYESTAR; deselect with -m 'not slow'"]
 testpaths = ["tests"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "UP"]
+
+# lal and lalsimulation are SWIG-generated and ligo.skymap.core is a C extension: neither exposes
+# its members to static analysis.
+[tool.ty.analysis]
+replace-imports-with-any = ["lal", "lalsimulation", "ligo.skymap.**"]
 
 [tool.ty.src]
 include = ["src", "tests"]

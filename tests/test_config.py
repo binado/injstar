@@ -1,0 +1,65 @@
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from injstar.config import RunConfig, load_run_config
+
+from .conftest import make_config
+
+
+def test_paths_resolve_against_the_config_file(config_file: Path) -> None:
+    config = load_run_config(config_file)
+
+    assert config.population == config_file.parent / "population.csv"
+    assert config.output_dir == config_file.parent / "out"
+    assert config.network == ("H1", "L1", "V1")
+    assert config.window_samples == 16384
+    assert config.crop_samples % 2 == 1
+
+
+def test_overrides_replace_file_values(config_file: Path, tmp_path: Path) -> None:
+    config = load_run_config(
+        config_file, output_dir=tmp_path / "elsewhere", seed=7, workers=None
+    )
+
+    assert config.output_dir == (tmp_path / "elsewhere").resolve()
+    assert config.seed == 7
+    assert config.workers == 1
+
+
+def test_toml_round_trip(config_file: Path, tmp_path: Path) -> None:
+    config = load_run_config(config_file)
+    copy = tmp_path / "copy.toml"
+    copy.write_text(config.to_toml())
+
+    assert load_run_config(copy) == config
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        ({"f_high": 4096.0}, "sample_rate / 2"),
+        ({"f_low": 2000.0}, "f_high must exceed f_low"),
+        ({"window_duration": 4.0001}, "whole number of samples"),
+        ({"crop_duration": 3.0}, "under half"),
+        ({"prior": {"max_distance": 10.0, "min_distance": 20.0}}, "max_distance"),
+        (
+            {"prior": {"max_distance": 10.0, "cosmology": True, "distance_power": 1}},
+            "distance_power = 2",
+        ),
+        ({"unknown_field": 1}, "Extra inputs"),
+    ],
+)
+def test_invalid_configs_are_rejected(
+    tmp_path: Path, fields: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        make_config(tmp_path, **fields)
+
+
+def test_max_distance_is_required(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="prior"):
+        RunConfig.model_validate(
+            {"network": "x", "population": tmp_path, "output_dir": tmp_path}
+        )
