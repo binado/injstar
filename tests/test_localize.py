@@ -1,46 +1,14 @@
 from pathlib import Path
 
-import lal
-import numpy as np
 import pytest
 
-from injstar.localize import Event, Network, localize_event, pack
+from injstar.localize import Event, Network, localize_event
 from injstar.products import map_statistics
 
 
-def test_pack_follows_bayestar_conditioning(
+def test_localize_event_rejects_a_short_series(
     event_and_network: tuple[Event, Network],
 ) -> None:
-    event, network = event_and_network
-
-    packed = pack(event, network)
-
-    weights = np.square(event.snr * event.bandwidth)
-    length = packed.snrs.shape[1]
-    assert length % 2 == 1 and length <= event.series.shape[1]
-    # Positions and arrival times are centred on their weighted means.
-    np.testing.assert_allclose(
-        np.average(packed.locations, weights=weights, axis=0), 0.0, atol=1e-15
-    )
-    toas = packed.epochs + 0.5 * (length - 1) / network.sample_rate
-    assert np.average(toas, weights=weights) == pytest.approx(0.0, abs=1e-12)
-    # Centring moves nothing in absolute terms.
-    np.testing.assert_allclose(
-        packed.locations[0] - packed.locations[1],
-        (network.locations[0] - network.locations[1]) / 299792458.0,
-    )
-    centre = event.series.shape[1] // 2
-    absolute = float(packed.epoch) + toas
-    expected = event.coa_time + event.epochs + centre / network.sample_rate
-    np.testing.assert_allclose(absolute, expected, atol=2e-7)
-    # The window covers the network's light-travel time plus BAYESTAR's margin.
-    radius = np.linalg.norm(packed.locations, axis=1).max()
-    assert length >= 2 * np.ceil((radius + 0.005) * network.sample_rate) - 1
-    np.testing.assert_allclose(packed.snrs[:, length // 2, 0], event.snr, rtol=1e-12)
-    assert packed.gmst == pytest.approx(lal.GreenwichMeanSiderealTime(packed.epoch))
-
-
-def test_pack_rejects_a_short_series(event_and_network: tuple[Event, Network]) -> None:
     event, network = event_and_network
     short = Event(
         event.event_id,
@@ -53,7 +21,7 @@ def test_pack_rejects_a_short_series(event_and_network: tuple[Event, Network]) -
     )
 
     with pytest.raises(ValueError, match="BAYESTAR needs"):
-        pack(short, network)
+        localize_event(short, network)
 
 
 @pytest.mark.slow

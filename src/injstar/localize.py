@@ -4,7 +4,8 @@ Packs simulated SNR series, response tensors, locations and horizons into the
 arguments of ``ligo.skymap.core.toa_phoa_snr``, runs one call per detected
 event, and applies the postprocessing of ``ligo.skymap.bayestar.localize``.
 
-:func:`pack` reproduces ``ligo.skymap.bayestar.condition``: detector positions
+:func:`localize_event` conditions each event as
+``ligo.skymap.bayestar.condition`` does: detector positions
 and arrival times are centred on their mean weighted by the inverse timing
 variance, and the series are trimmed to the light-travel time across the
 network plus 5 ms (or a quarter autocorrelation period if that is longer).
@@ -91,32 +92,31 @@ class Network:
     rescale_loglikelihood: float
 
 
-@dataclass(frozen=True)
-class Packed:
-    """Arguments of ``core.toa_phoa_snr`` that depend on the event."""
-
-    epoch: lal.LIGOTimeGPS
-    gmst: float
-    epochs: NDArray[np.float64]
-    snrs: NDArray[np.float64]
-    locations: NDArray[np.float64]
-
-
-def pack(event: Event, network: Network) -> Packed:
-    """Condition one event as ``ligo.skymap.bayestar.condition`` does.
+def localize_event(event: Event, network: Network) -> Table:
+    """Localize one event with BAYESTAR.
 
     Parameters
     ----------
     event
         Simulated event.
     network
-        Network geometry and sampling.
+        Network geometry, sampling and prior.
+
+    Returns
+    -------
+    astropy.table.Table
+        Multi-order sky map with ``UNIQ``, ``PROBDENSITY``, ``DISTMU``,
+        ``DISTSIGMA`` and ``DISTNORM``; ``log_bci`` and ``log_bsn`` are in
+        ``meta``.
 
     Raises
     ------
     ValueError
-        If the SNR series is shorter than BAYESTAR's arrival-time window.
+        If the SNR series has even length or is shorter than BAYESTAR's
+        arrival-time window, or if the timing weights are unusable.
     """
+    # Condition as ``ligo.skymap.bayestar.condition`` does.
+    start = time.perf_counter()
     rate = network.sample_rate
     weights = np.square(event.snr * event.bandwidth)
     if not np.all(np.isfinite(weights)) or weights.sum() <= 0:
@@ -157,46 +157,20 @@ def pack(event: Event, network: Network) -> Packed:
     snrs = np.stack(
         (np.abs(series), np.stack([unwrap(np.angle(row)) for row in series])), axis=-1
     )
-    return Packed(
-        epoch=epoch,
-        gmst=lal.GreenwichMeanSiderealTime(epoch),
-        epochs=first_samples,
-        snrs=snrs,
-        locations=locations,
-    )
+    gmst = lal.GreenwichMeanSiderealTime(epoch)
 
-
-def localize_event(event: Event, network: Network) -> Table:
-    """Localize one event with BAYESTAR.
-
-    Parameters
-    ----------
-    event
-        Simulated event.
-    network
-        Network geometry, sampling and prior.
-
-    Returns
-    -------
-    astropy.table.Table
-        Multi-order sky map with ``UNIQ``, ``PROBDENSITY``, ``DISTMU``,
-        ``DISTSIGMA`` and ``DISTNORM``; ``log_bci`` and ``log_bsn`` are in
-        ``meta``.
-    """
-    start = time.perf_counter()
-    packed = pack(event, network)
     prior = network.prior
     pixels, log_bci, log_bsn = core.toa_phoa_snr(
         prior.min_distance,
         prior.max_distance,
         prior.distance_power,
         prior.cosmology,
-        packed.gmst,
+        gmst,
         network.sample_rate,
-        packed.epochs,
-        packed.snrs.astype(np.float32),
+        first_samples,
+        snrs.astype(np.float32),
         np.asarray(network.responses, dtype=np.float32),
-        packed.locations,
+        locations,
         np.asarray(event.horizon, dtype=float),
         network.rescale_loglikelihood,
     )
@@ -228,7 +202,7 @@ def localize_event(event: Event, network: Network) -> Table:
         creator="BAYESTAR",
         origin="injstar",
         vcs_version=f"injstar {__version__}",
-        gps_time=float(packed.epoch),
+        gps_time=float(epoch),
         gps_creation_time=lal.GPSTimeNow(),
         instruments=set(network.names),
         runtime=time.perf_counter() - start,
