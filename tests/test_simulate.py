@@ -20,6 +20,22 @@ def events(population_csv: Path) -> dict[str, np.ndarray]:
     )
 
 
+@pytest.fixture
+def tidal_events(population_csv: Path, tmp_path: Path) -> dict[str, np.ndarray]:
+    header, *rows = population_csv.read_text().splitlines()
+    path = tmp_path / "tidal.csv"
+    path.write_text(
+        "\n".join(
+            [f"{header},lambda_1,lambda_2", *(f"{row},400.0,400.0" for row in rows)]
+        )
+        + "\n"
+    )
+    population = read_population(path)
+    return simulation_events(
+        population, greenwich_sidereal_time(population["coa_time"])
+    )
+
+
 def repeat(
     events: dict[str, np.ndarray], row: int, count: int
 ) -> dict[str, np.ndarray]:
@@ -145,3 +161,50 @@ def test_detection_rule(
     np.testing.assert_allclose(
         result.network_snr, np.sqrt(np.sum(result.observed_snr**2, axis=1))
     )
+
+
+@pytest.mark.parametrize(
+    "approximant", ["IMRPhenomD_NRTidalv2", "IMRPhenomXAS_NRTidalv3", "TaylorF2"]
+)
+def test_tidal_model_gives_finite_positive_horizons(
+    tmp_path: Path,
+    registry: DetectorRegistry,
+    tidal_events: dict[str, np.ndarray],
+    approximant: str,
+) -> None:
+    config = make_config(tmp_path, noise=False, waveform_approximant=approximant)
+
+    horizon = Simulator.from_config(config, registry).snr(tidal_events).horizon
+
+    # The last row is the binary neutron star.
+    assert np.all(np.isfinite(horizon[2]))
+    assert np.all(horizon[2] > 0)
+
+
+def test_tidal_deformability_reaches_a_tidal_model(
+    tmp_path: Path,
+    registry: DetectorRegistry,
+    events: dict[str, np.ndarray],
+    tidal_events: dict[str, np.ndarray],
+) -> None:
+    simulator = Simulator.from_config(
+        make_config(tmp_path, noise=False, waveform_approximant="TaylorF2"), registry
+    )
+
+    undeformed = simulator.snr(events).horizon[2]
+    deformed = simulator.snr(tidal_events).horizon[2]
+
+    assert not np.array_equal(undeformed, deformed)
+
+
+def test_event_fields_follow_the_waveform(
+    tmp_path: Path, registry: DetectorRegistry
+) -> None:
+    aligned = Simulator.from_config(make_config(tmp_path), registry)
+    tidal = Simulator.from_config(
+        make_config(tmp_path, waveform_approximant="TaylorF2"), registry
+    )
+
+    assert "lambda_1" not in aligned.event_fields
+    assert "lambda_1" in tidal.event_fields
+    assert len(set(tidal.event_fields)) == len(tidal.event_fields)
