@@ -34,6 +34,23 @@ def test_json_round_trip(config_file: Path) -> None:
     assert RunConfig.model_validate_json(config.model_dump_json()) == config
 
 
+def test_json_round_trip_keeps_the_template_approximant(tmp_path: Path) -> None:
+    config = make_config(
+        tmp_path,
+        waveform_approximant="IMRPhenomXPHM",
+        template_approximant="IMRPhenomXAS",
+    )
+
+    restored = RunConfig.model_validate_json(config.model_dump_json())
+
+    assert restored == config
+    assert restored.template_approximant == "IMRPhenomXAS"
+
+
+def test_template_approximant_defaults_to_the_signal_model(tmp_path: Path) -> None:
+    assert make_config(tmp_path).template_approximant is None
+
+
 @pytest.mark.parametrize(
     ("fields", "message"),
     [

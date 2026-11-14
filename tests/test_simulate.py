@@ -54,7 +54,8 @@ def test_zero_noise_peak_is_the_expected_snr(
     result = simulator.series(events)
 
     scalars = result.scalars
-    # The peak falls between samples, so the sampled maximum is just below it.
+    # The peak falls between samples, so the sampled maximum is just below it;
+    # by Cauchy-Schwarz it is never above the optimal SNR, whatever the template.
     assert np.all(scalars.observed_snr <= scalars.expected_snr * (1 + 1e-9))
     np.testing.assert_allclose(scalars.observed_snr, scalars.expected_snr, rtol=0.02)
     centre = result.series.shape[-1] // 2
@@ -208,3 +209,54 @@ def test_event_fields_follow_the_waveform(
     assert "lambda_1" not in aligned.event_fields
     assert "lambda_1" in tidal.event_fields
     assert len(set(tidal.event_fields)) == len(tidal.event_fields)
+
+
+@pytest.mark.parametrize("signal", ["IMRPhenomXHM", "IMRPhenomXPHM"])
+def test_higher_mode_signal_never_exceeds_its_optimal_snr(
+    tmp_path: Path,
+    registry: DetectorRegistry,
+    events: dict[str, np.ndarray],
+    signal: str,
+) -> None:
+    config = make_config(
+        tmp_path,
+        noise=False,
+        waveform_approximant=signal,
+        template_approximant="IMRPhenomXAS",
+    )
+
+    result = Simulator.from_config(config, registry).snr(events)
+
+    assert np.all(np.isfinite(result.expected_snr))
+    assert np.all(np.isfinite(result.observed_snr))
+    assert np.all(result.observed_snr <= result.expected_snr * (1 + 1e-9))
+    # The dominant-mode template recovers most of a higher-mode signal.
+    np.testing.assert_allclose(result.observed_snr, result.expected_snr, rtol=0.05)
+
+
+def test_horizon_comes_from_the_template_not_the_signal(
+    tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
+) -> None:
+    template_only = make_config(
+        tmp_path, noise=False, waveform_approximant="IMRPhenomXAS"
+    )
+    higher_modes = make_config(
+        tmp_path,
+        noise=False,
+        waveform_approximant="IMRPhenomXPHM",
+        template_approximant="IMRPhenomXAS",
+    )
+
+    expected = Simulator.from_config(template_only, registry).snr(events).horizon
+    horizon = Simulator.from_config(higher_modes, registry).snr(events).horizon
+
+    np.testing.assert_allclose(horizon, expected)
+
+
+def test_from_config_rejects_a_higher_mode_template(
+    tmp_path: Path, registry: DetectorRegistry
+) -> None:
+    config = make_config(tmp_path, waveform_approximant="IMRPhenomXHM")
+
+    with pytest.raises(ValueError, match="template_approximant"):
+        Simulator.from_config(config, registry)
