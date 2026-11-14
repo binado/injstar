@@ -9,7 +9,10 @@ Required per event: ``detector_frame_mass_1``, ``detector_frame_mass_2`` (or
 ``source_frame_mass_1``, ``source_frame_mass_2`` with ``redshift``),
 ``distance`` in Mpc (alias ``luminosity_distance``), ``right_ascension``,
 ``declination``, ``inclination``, ``polarization_angle`` and ``coa_time`` (GPS
-seconds at the geocentre). ``spin_1z`` and ``spin_2z`` default to zero.
+seconds at the geocentre). The spin components ``spin_1x`` to ``spin_2z``,
+the tidal deformabilities ``lambda_1`` and ``lambda_2`` and the orbital phase
+``coa_phase`` default to zero; which of them the simulation reads depends on
+the waveform model, and a column the model does not read is ignored.
 ``event_id`` defaults to the row index. Masses are in solar masses and angles
 in radians.
 
@@ -30,14 +33,34 @@ CANONICAL_COLUMNS = (
     "event_id",
     "detector_frame_mass_1",
     "detector_frame_mass_2",
+    "spin_1x",
+    "spin_1y",
     "spin_1z",
+    "spin_2x",
+    "spin_2y",
     "spin_2z",
+    "lambda_1",
+    "lambda_2",
     "distance",
     "right_ascension",
     "declination",
     "inclination",
+    "coa_phase",
     "polarization_angle",
     "coa_time",
+)
+
+#: Columns that default to zero when the population lacks them.
+_ZERO_DEFAULTS = (
+    "spin_1x",
+    "spin_1y",
+    "spin_1z",
+    "spin_2x",
+    "spin_2y",
+    "spin_2z",
+    "lambda_1",
+    "lambda_2",
+    "coa_phase",
 )
 
 _ALIASES = {"luminosity_distance": "distance"}
@@ -144,8 +167,8 @@ def read_population(path: Path, *, cosmology: str = "Planck18") -> Population:
     (count,) = sizes
 
     columns.setdefault("event_id", np.arange(count))
-    columns.setdefault("spin_1z", np.zeros(count))
-    columns.setdefault("spin_2z", np.zeros(count))
+    for name in _ZERO_DEFAULTS:
+        columns.setdefault(name, np.zeros(count))
     missing = [name for name in CANONICAL_COLUMNS if name not in columns]
     if missing:
         raise ValueError(f"population lacks the columns {missing}")

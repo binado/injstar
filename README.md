@@ -63,9 +63,13 @@ The output directory holds:
 
 `detector_frame_mass_1`, `detector_frame_mass_2` (solar masses), `distance`
 (Mpc), `right_ascension`, `declination`, `inclination`, `polarization_angle`
-(radians) and `coa_time` (geocentric GPS seconds). `spin_1z`, `spin_2z` and
-`event_id` are optional. Source-frame masses with `redshift` are accepted
-instead of detector-frame masses.
+(radians) and `coa_time` (geocentric GPS seconds). `event_id` is optional and
+defaults to the row index. The spin components `spin_1x` to `spin_2z`, the
+tidal deformabilities `lambda_1` and `lambda_2` and the orbital phase
+`coa_phase` (radians) are optional and default to zero. Which of them a run reads depends on the waveform model
+(`waveform_approximant`); a column the model does not read is ignored.
+Source-frame masses with `redshift` are accepted instead of detector-frame
+masses.
 
 ### Detectors
 

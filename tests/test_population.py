@@ -90,6 +90,16 @@ def test_bad_populations_are_rejected(
         read_population(path)
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["spin_1x", "spin_1y", "spin_2x", "spin_2y", "lambda_1", "lambda_2", "coa_phase"],
+)
+def test_optional_columns_default_to_zero(population_csv: Path, name: str) -> None:
+    population = read_population(population_csv)
+
+    np.testing.assert_array_equal(population[name], np.zeros(3))
+
+
 def test_simulation_events_pass_columns_through(population_csv: Path) -> None:
     population = read_population(population_csv)
     gmst = np.array([0.1, 0.2, 0.3])
