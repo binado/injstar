@@ -18,6 +18,7 @@ MODULES = [
     "products",
     "runtime",
     "simulate",
+    "waveform",
 ]
 
 
