@@ -36,6 +36,8 @@ A prek pre-commit hook runs ruff and `ty` on the whole tree, so every commit mus
 - `core.toa_phoa_snr` requires `snrs` and `responses` to already be float32 (float64 raises `TypeError`).
 - ligo.skymap, lal and lalsimulation are not statically analyzable; `ty` is configured with `replace-imports-with-any` for them in `pyproject.toml`.
 - Response tensors here are geodetic and differ from LAL's by up to 3e-4 (H1/L1) and 2e-3 (K1); BAYESTAR's own tools use LAL's. Horizon uses a rectangle sum rather than ligo.skymap's trapezoid.
+- `inclination` is the angle between L (at `reference_frequency`) and the line of sight (LAL/ripple `iota`), not θ_JN, for precessing signals. BAYESTAR's signal model is `0.5(1+u²)Re − i·u·Im`; ripple gives `h× = −i cos ι · h₊`, so injecting ripple's strain matches it.
+- The template (`template_approximant`) must be a dominant-mode aligned-spin model; the injected signal (`waveform_approximant`) may be anything ripple has.
 - Tests marked `slow` call BAYESTAR; CI runs them only on Python 3.14 (matrix is 3.12–3.14).
 
 ## Git
