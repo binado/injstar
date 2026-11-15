@@ -22,12 +22,14 @@ def snr(
     """Compute the SNRs and detection flags of every injection."""
 
     def stage() -> None:
-        from injstar import io, pipeline
+        from gwmock_pop.loaders.file_loader import read_population_catalogue
+
+        from injstar import pipeline
         from injstar.config import load_run_config
 
         loaded = load_run_config(config, output_dir=output_dir, seed=seed)
         path = pipeline.compute_snr(loaded, overwrite=overwrite)
-        columns, _ = io.read_table(path)
+        columns = read_population_catalogue(path)
         detected = int(columns["detected"].sum())
         typer.echo(f"{detected} of {len(columns['detected'])} injections detected")
         typer.echo(path)

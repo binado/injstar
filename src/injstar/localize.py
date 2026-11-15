@@ -38,7 +38,7 @@ class Event:
 
     Attributes
     ----------
-    event_id
+    row_index
         Identifier from the population.
     coa_time
         Geocentric coalescence GPS time in seconds.
@@ -54,7 +54,7 @@ class Event:
         SNR = 1 distance per detector in Mpc.
     """
 
-    event_id: int
+    row_index: int
     coa_time: float
     series: NDArray[np.complex128]
     epochs: NDArray[np.float64]
@@ -148,7 +148,7 @@ def condition_event(event: Event, network: Network) -> BayestarInputs:
     rate = network.sampling_frequency
     weights = np.square(event.snr * event.bandwidth)
     if not np.all(np.isfinite(weights)) or weights.sum() <= 0:
-        raise ValueError(f"event {event.event_id} has no usable timing weights")
+        raise ValueError(f"event {event.row_index} has no usable timing weights")
 
     locations = network.locations / SPEED_OF_LIGHT_M_S
     locations = locations - np.average(locations, weights=weights, axis=0)
@@ -258,7 +258,7 @@ def localize_event(event: Event, network: Network) -> Table:
     r2bar = (prob * (np.square(diststd[good]) + np.square(distmean[good]))).sum()
 
     skymap.meta.update(
-        objid=str(event.event_id),
+        objid=str(event.row_index),
         log_bci=float(log_bci),
         log_bsn=float(log_bsn),
         distmean=float(rbar),
@@ -295,7 +295,7 @@ def localize_to_file(event: Event, network: Network, output_dir: Path) -> int:
         The event id.
     """
     skymap = localize_event(event, network)
-    target = skymap_path(output_dir, event.event_id)
+    target = skymap_path(output_dir, event.row_index)
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(f".{target.name}.{os.getpid()}.partial.fits")
     try:
@@ -304,4 +304,4 @@ def localize_to_file(event: Event, network: Network, output_dir: Path) -> int:
         os.replace(partial, target)
     finally:
         partial.unlink(missing_ok=True)
-    return event.event_id
+    return event.row_index

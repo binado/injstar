@@ -44,7 +44,6 @@ def repeat(
     out = {
         name: np.repeat(values[row : row + 1], count) for name, values in events.items()
     }
-    out["event_id"] = np.arange(count, dtype=np.uint64)
     return out
 
 
@@ -160,7 +159,7 @@ def test_results_do_not_depend_on_batching_or_order(
     ).series(many)
     shuffled = Simulator.from_config(
         make_config(tmp_path, batch_size=3), registry
-    ).series({name: values[order] for name, values in many.items()})
+    ).series({name: values[order] for name, values in many.items()}, rows=order)
 
     assert_close(shuffled.series, reference.series[order])
     np.testing.assert_array_equal(

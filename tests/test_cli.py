@@ -2,9 +2,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from gwmock_pop.loaders.file_loader import read_population_catalogue
 from typer.testing import CliRunner
 
-from injstar import io
 from injstar.cli import app
 from injstar.config import RunConfig, load_run_config
 
@@ -37,8 +37,8 @@ def test_named_network_matches_explicit_detectors(config_file: Path) -> None:
     code, output = invoke("snr", config_file, "--output-dir", named)
     assert code == 0, output
 
-    expected, _ = io.read_table(explicit / "injections.h5")
-    actual, _ = io.read_table(named / "injections.h5")
+    expected = read_population_catalogue(explicit / "injections.h5")
+    actual = read_population_catalogue(named / "injections.h5")
     assert actual.keys() == expected.keys()
     for name, values in expected.items():
         np.testing.assert_array_equal(actual[name], values)
@@ -53,10 +53,11 @@ def test_snr_writes_injections_and_no_maps(config_file: Path) -> None:
     assert sorted(path.name for path in out.iterdir()) == [
         "config.json", "injections.h5",
     ]  # fmt: skip
-    columns, _ = io.read_table(out / "injections.h5")
+    columns = read_population_catalogue(out / "injections.h5")
     for name in ("expected_snr_H1", "observed_snr_V1", "horizon_L1", "network_snr"):
         assert columns[name].shape == (3,)
     np.testing.assert_array_equal(columns["detected"], [True, False, True])
+    assert "event_id" not in columns
 
 
 def test_snr_records_the_config_it_ran(config_file: Path) -> None:
@@ -74,14 +75,18 @@ def test_snr_ignores_snr_columns_in_the_population(
     invoke("snr", config_file, "--output-dir", tmp_path / "plain")
     lines = population_csv.read_text().splitlines()
     population_csv.write_text(
-        "\n".join([lines[0] + ",snr", *(line + ",999.0" for line in lines[1:])]) + "\n"
+        "\n".join(
+            [lines[0] + ",snr,event_id", *(line + ",999.0,42" for line in lines[1:])]
+        )
+        + "\n"
     )
     code, output = invoke("snr", config_file, "--output-dir", tmp_path / "bogus")
 
     assert code == 0, output
-    plain, _ = io.read_table(tmp_path / "plain" / "injections.h5")
-    bogus, _ = io.read_table(tmp_path / "bogus" / "injections.h5")
-    np.testing.assert_array_equal(bogus["population_snr"], [999.0] * 3)
+    plain = read_population_catalogue(tmp_path / "plain" / "injections.h5")
+    bogus = read_population_catalogue(tmp_path / "bogus" / "injections.h5")
+    np.testing.assert_array_equal(bogus["snr"], [999.0] * 3)
+    np.testing.assert_array_equal(bogus["event_id"], [42] * 3)
     for name, values in plain.items():
         np.testing.assert_array_equal(bogus[name], values)
 
@@ -126,7 +131,20 @@ def test_invalid_config_reports_an_error(config_file: Path) -> None:
 
 
 @pytest.mark.slow
-def test_run_resume_and_summarise(config_file: Path) -> None:
+def test_run_resume_and_summarise(config_file: Path, population_csv: Path) -> None:
+    lines = population_csv.read_text().splitlines()
+    population_csv.write_text(
+        "\n".join(
+            [
+                lines[0] + ",label",
+                *(
+                    line + "," + label
+                    for line, label in zip(lines[1:], ["b", "a", "c"], strict=True)
+                ),
+            ]
+        )
+        + "\n"
+    )
     out = config_file.parent / "out"
     assert invoke("snr", config_file)[0] == 0
 
@@ -135,10 +153,12 @@ def test_run_resume_and_summarise(config_file: Path) -> None:
     assert code == 0, output
     maps = sorted(path.name for path in (out / "skymaps").iterdir())
     assert maps == ["0.multiorder.fits", "2.multiorder.fits"]
-    first, _ = io.read_table(out / "summary.h5")
+    first = read_population_catalogue(out / "summary.h5")
+    assert "event_id" not in first
+    np.testing.assert_array_equal(first["label"], [b"b", b"a", b"c"])
     np.testing.assert_array_equal(first["localized"], [True, False, True])
     assert np.isnan(first["area_90"][1])
-    assert first["skymap"][0] == "skymaps/0.multiorder.fits"
+    assert "skymap" not in first
     assert np.all(first["area_90"][[0, 2]] > first["area_50"][[0, 2]])
 
     # A finished directory is not silently redone.
@@ -152,12 +172,27 @@ def test_run_resume_and_summarise(config_file: Path) -> None:
 
     assert code == 0, output
     assert (out / "skymaps" / "0.multiorder.fits").stat().st_mtime_ns == kept
-    resumed, _ = io.read_table(out / "summary.h5")
+    resumed = read_population_catalogue(out / "summary.h5")
     for name, values in first.items():
         np.testing.assert_array_equal(resumed[name], values)
 
     (out / "summary.h5").unlink()
     assert invoke("summarise", out)[0] == 0
-    rebuilt, _ = io.read_table(out / "summary.h5")
+    rebuilt = read_population_catalogue(out / "summary.h5")
     for name, values in first.items():
         np.testing.assert_array_equal(rebuilt[name], values)
+
+
+@pytest.mark.parametrize(
+    "name", ["network_snr", "expected_snr_H1", "area_90", "localized"]
+)
+def test_generated_column_collision_rejected(
+    config_file: Path, population_csv: Path, name: str
+) -> None:
+    lines = population_csv.read_text().splitlines()
+    population_csv.write_text(
+        "\n".join([lines[0] + "," + name, *(line + ",1" for line in lines[1:])]) + "\n"
+    )
+    code, output = invoke("snr", config_file)
+    assert code == 1
+    assert name in output

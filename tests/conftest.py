@@ -153,7 +153,7 @@ def event_and_network(
     )
     names, responses, locations = registry.arrays(config.network)
     event = Event(
-        event_id=0,
+        row_index=0,
         coa_time=float(population["coa_time"][0]),
         series=drawn.series[0],
         epochs=drawn.epochs[0],

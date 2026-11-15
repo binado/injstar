@@ -69,7 +69,6 @@ from injstar.waveform import waveform as make_waveform
 #: Per-event inputs that do not depend on the waveform models, each an array over
 #: events.
 EXTRINSIC_FIELDS = (
-    "event_id",
     "right_ascension",
     "declination",
     "polarization_angle",
@@ -369,7 +368,9 @@ class Simulator:
             )
         )
 
-    def _event(self, event: Mapping[str, jax.Array]) -> dict[str, jax.Array]:
+    def _event(
+        self, event: Mapping[str, jax.Array], row: jax.Array
+    ) -> dict[str, jax.Array]:
         """Simulate one event; every output leads with the detector axis."""
         frequencies = jnp.asarray(self.frequencies)
         inverse_psd = jnp.asarray(self._inverse_psd)
@@ -421,10 +422,9 @@ class Simulator:
         )
         expected = matched_filter.optimal_snr(data, inverse_psd=inverse_psd, delta_f=df)
         if self.noise:
-            # The key depends only on the root key and the 64-bit event id.
-            event_id = event["event_id"]
-            high = (event_id >> 32).astype(jnp.uint32)
-            low = (event_id & 0xFFFFFFFF).astype(jnp.uint32)
+            # The key depends only on the root key and the 64-bit row index.
+            high = (row >> 32).astype(jnp.uint32)
+            low = (row & 0xFFFFFFFF).astype(jnp.uint32)
             key = jax.random.fold_in(jax.random.fold_in(self._root, high), low)
             draw = jax.random.normal(key, (*inverse_psd.shape, 2))
             data = data + _noise_spectrum(
@@ -461,35 +461,45 @@ class Simulator:
         }
 
     def _batches(
-        self, events: Mapping[str, NDArray]
-    ) -> Iterator[tuple[int, dict[str, jax.Array]]]:
+        self, events: Mapping[str, NDArray], rows: NDArray
+    ) -> Iterator[tuple[int, dict[str, jax.Array], jax.Array]]:
         """Fixed-size batches, the last padded by repeating its final event."""
         fields = self.event_fields
         missing = [name for name in fields if name not in events]
         if missing:
             raise KeyError(f"events lack the fields {missing}")
-        count = len(events["event_id"])
+        count = len(rows)
         size = self.batch_size
         for start in range(0, count, size):
             index = np.minimum(np.arange(start, start + size), count - 1)
             batch = {
                 name: jnp.asarray(
                     np.asarray(events[name])[index],
-                    dtype=jnp.uint64 if name == "event_id" else jnp.float64,
+                    dtype=jnp.float64,
                 )
                 for name in fields
             }
-            yield min(size, count - start), batch
+            yield (
+                min(size, count - start),
+                batch,
+                jnp.asarray(rows[index], dtype=jnp.uint64),
+            )
 
-    def _run(self, events: Mapping[str, NDArray], keep: Sequence[str]) -> dict:
+    def _run(
+        self, events: Mapping[str, NDArray], keep: Sequence[str], rows: NDArray | None
+    ) -> dict:
+        if rows is None:
+            rows = np.arange(len(next(iter(events.values()))), dtype=np.uint64)
         chunks: dict[str, list[np.ndarray]] = {name: [] for name in keep}
-        for valid, batch in self._batches(events):
-            output = self._batched(batch)
+        for valid, batch, batch_rows in self._batches(events, rows):
+            output = self._batched(batch, batch_rows)
             for name in keep:
                 chunks[name].append(np.asarray(output[name])[:valid])
         return {name: np.concatenate(parts) for name, parts in chunks.items()}
 
-    def snr(self, events: Mapping[str, NDArray]) -> SnrResult:
+    def snr(
+        self, events: Mapping[str, NDArray], *, rows: NDArray | None = None
+    ) -> SnrResult:
         """Expected and observed SNRs and detection flags.
 
         Parameters
@@ -497,19 +507,25 @@ class Simulator:
         events
             Arrays over events for each name in :attr:`event_fields`. Masses
             are detector-frame in solar masses, distance in Mpc, angles in
-            radians; ``event_id`` is a non-negative integer. Other entries are
-            ignored.
+            radians. Other entries are ignored.
+        rows
+            Original zero-based row indices used to seed noise. Defaults to
+            consecutive indices in input order.
         """
-        return SnrResult(**self._run(events, SCALAR_FIELDS))
+        return SnrResult(**self._run(events, SCALAR_FIELDS, rows))
 
-    def series(self, events: Mapping[str, NDArray]) -> SeriesResult:
+    def series(
+        self, events: Mapping[str, NDArray], *, rows: NDArray | None = None
+    ) -> SeriesResult:
         """Cropped SNR time series, with the scalars of :meth:`snr`.
 
         Parameters
         ----------
         events
             As for :meth:`snr`.
+        rows
+            Original row indices, as for :meth:`snr`.
         """
-        output = self._run(events, (*SCALAR_FIELDS, "series", "epochs"))
+        output = self._run(events, (*SCALAR_FIELDS, "series", "epochs"), rows)
         series, epochs = output.pop("series"), output.pop("epochs")
         return SeriesResult(SnrResult(**output), series, epochs)

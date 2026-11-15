@@ -11,8 +11,6 @@ def test_csv_gives_canonical_columns(population_csv: Path) -> None:
     population = read_population(population_csv)
 
     assert tuple(population) == CANONICAL_COLUMNS
-    np.testing.assert_array_equal(population["event_id"], [0, 1, 2])
-    assert population["event_id"].dtype == np.uint64
     assert population["distance"][0] == 1500.0
 
 
@@ -20,7 +18,7 @@ def test_hdf5_structured_dataset_matches_csv(
     population_csv: Path, tmp_path: Path
 ) -> None:
     expected = read_population(population_csv)
-    names = CANONICAL_COLUMNS[1:]
+    names = CANONICAL_COLUMNS
     table = np.zeros(3, dtype=[(name, "f8") for name in names])
     for name in names:
         table[name] = expected[name]
@@ -35,41 +33,65 @@ def test_hdf5_structured_dataset_matches_csv(
         np.testing.assert_array_equal(population[name], expected[name])
 
 
-def test_snr_columns_are_carried_not_used(population_csv: Path, tmp_path: Path) -> None:
+def test_extra_columns_keep_names_and_row_order(
+    population_csv: Path, tmp_path: Path
+) -> None:
     lines = population_csv.read_text().splitlines()
-    path = tmp_path / "with_snr.csv"
+    path = tmp_path / "extra.csv"
     path.write_text(
-        "\n".join([lines[0] + ",snr", *(line + ",999.0" for line in lines[1:])]) + "\n"
+        "\n".join(
+            [
+                lines[0] + ",label",
+                *(
+                    line + "," + label
+                    for line, label in zip(lines[1:], ["b", "a", "c"], strict=True)
+                ),
+            ]
+        )
+        + "\n"
     )
-
     population = read_population(path)
+    np.testing.assert_array_equal(population["label"], ["b", "a", "c"])
+    np.testing.assert_array_equal(population["detector_frame_mass_1"], [36, 30, 1.4])
 
-    np.testing.assert_array_equal(population["population_snr"], [999.0] * 3)
-    assert "snr" not in population
+
+def test_hdf5_group_matches_csv(population_csv: Path, tmp_path: Path) -> None:
+    expected = read_population(population_csv)
+    path = tmp_path / "population.hdf5"
+    with h5py.File(path, "w") as file:
+        group = file.create_group("data")
+        for name, values in expected.items():
+            group.create_dataset(name, data=values)
+    actual = read_population(path)
+    for name in expected:
+        np.testing.assert_array_equal(actual[name], expected[name])
 
 
-def test_luminosity_distance_alias(population_csv: Path, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (",distance,", ",luminosity_distance,"),
+        ("detector_frame_mass_1", "source_frame_mass_1"),
+        ("detector_frame_mass_2", "source_frame_mass_2"),
+    ],
+)
+def test_canonical_columns_required(
+    population_csv: Path, tmp_path: Path, old: str, new: str
+) -> None:
     path = tmp_path / "alias.csv"
-    path.write_text(
-        population_csv.read_text().replace(",distance,", ",luminosity_distance,")
+    path.write_text(population_csv.read_text().replace(old, new))
+    with pytest.raises(ValueError, match="lacks the columns"):
+        read_population(path)
+
+
+def test_event_id_is_preserved(population_csv: Path) -> None:
+    lines = population_csv.read_text().splitlines()
+    population_csv.write_text(
+        "\n".join([lines[0] + ",event_id", *(line + ",1" for line in lines[1:])]) + "\n"
     )
-
-    assert read_population(path)["distance"][0] == 1500.0
-
-
-def test_source_frame_masses_are_redshifted(tmp_path: Path) -> None:
-    path = tmp_path / "source.csv"
-    path.write_text(
-        "source_frame_mass_1,source_frame_mass_2,redshift,right_ascension,"
-        "declination,inclination,polarization_angle,coa_time\n"
-        "30.0,20.0,0.5,1.0,0.2,0.3,0.4,1400000000.0\n"
+    np.testing.assert_array_equal(
+        read_population(population_csv)["event_id"], [1, 1, 1]
     )
-
-    population = read_population(path, cosmology="Planck18")
-
-    assert population["detector_frame_mass_1"][0] == pytest.approx(45.0)
-    assert population["detector_frame_mass_2"][0] == pytest.approx(30.0)
-    assert population["distance"][0] == pytest.approx(2918, rel=0.01)
 
 
 @pytest.mark.parametrize(
@@ -108,5 +130,5 @@ def test_simulation_events_pass_columns_through(population_csv: Path) -> None:
 
     assert "coa_time" not in events
     np.testing.assert_array_equal(events["gmst"], gmst)
-    for name in ("detector_frame_mass_1", "distance", "inclination", "event_id"):
+    for name in ("detector_frame_mass_1", "distance", "inclination"):
         np.testing.assert_array_equal(events[name], population[name])

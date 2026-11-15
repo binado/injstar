@@ -11,7 +11,7 @@ done: no coverage test and no high-SNR validation has been run yet.
 
 ## Setup
 
-[Install uv](https://docs.astral.sh/uv/getting-started/installation/) and
+Python 3.13 or later is required. [Install uv](https://docs.astral.sh/uv/getting-started/installation/) and
 [Just](https://just.systems/man/en/packages.html), then run:
 
 ```console
@@ -48,28 +48,38 @@ uv run injstar summarise out       # rebuild summary.h5 from the sky maps
 
 `snr` never calls BAYESTAR, so it is the cheap way to size a run. `run`
 reuses its result. The population file needs no SNR column; any it has is
-carried through as `population_<name>` and not used.
+carried through under its original name and not used.
 
 The output directory holds:
 
 | File | Contents |
 | --- | --- |
 | `injections.h5` | One row per injection: truth, expected and observed SNR per detector, network SNR, `detected`. |
-| `skymaps/<event_id>.multiorder.fits` | BAYESTAR sky map of each detected event. |
+| `skymaps/<row_index>.multiorder.fits` | BAYESTAR sky map of each detected event. |
 | `summary.h5` | `injections.h5` plus 50% and 90% areas, searched area and probability, distance quantiles, `log_bci`, `log_bsn`. |
 | `config.json` | The run config as validated, with paths made absolute. |
+
+The HDF5 tables use gwmock-pop’s structured `data` dataset. Text columns are
+stored as UTF-8 bytes. Run directories created with the previous table layout
+must be regenerated before resuming or summarising.
 
 ### Population columns
 
 `detector_frame_mass_1`, `detector_frame_mass_2` (solar masses), `distance`
 (Mpc), `right_ascension`, `declination`, `inclination`, `polarization_angle`
-(radians) and `coa_time` (geocentric GPS seconds). `event_id` is optional and
-defaults to the row index. The spin components `spin_1x` to `spin_2z`, the
-tidal deformabilities `lambda_1` and `lambda_2` and the orbital phase
+(radians) and `coa_time` (geocentric GPS seconds). The zero-based input row
+index determines noise seeds and sky-map filenames. The spin components
+`spin_1x` to `spin_2z`, the tidal deformabilities `lambda_1` and `lambda_2` and the orbital phase
 `coa_phase` (radians) are optional and default to zero. Which of them a run reads depends on the waveform model
 (`waveform_approximant`); a column the model does not read is ignored.
-Source-frame masses with `redshift` are accepted instead of detector-frame
-masses.
+Extra columns retain their original names in both output tables. Names reserved
+for generated output columns (including per-detector SNRs, detection flags,
+and summary statistics) are rejected.
+
+Convert catalogues using source-frame masses or `luminosity_distance` to the
+required columns before running. Remove the obsolete
+`population_cosmology` setting from run configurations. Existing run directories
+based on custom event IDs must not be resumed; start a new run directory.
 
 ### Waveform models
 
