@@ -54,7 +54,7 @@ class PycbcWaveform(WaveformGenerator[np.ndarray]):
     def __call__(
         self, frequencies: np.ndarray, source: Mapping[str, np.ndarray | float]
     ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
-        from pycbc.waveform import get_fd_waveform
+        pycbc_waveform_module = pytest.importorskip("pycbc.waveform")
 
         if frequencies.ndim != 1 or len(frequencies) < 2:
             raise ValueError("expected a one-dimensional grid of at least two bins")
@@ -68,7 +68,7 @@ class PycbcWaveform(WaveformGenerator[np.ndarray]):
         ):
             raise ValueError("expected contiguous bins on a zero-origin FFT grid")
 
-        plus, cross = get_fd_waveform(
+        plus, cross = pycbc_waveform_module.get_fd_waveform(
             approximant="IMRPhenomD",
             mass1=float(source["detector_frame_mass_1"]),
             mass2=float(source["detector_frame_mass_2"]),
@@ -94,9 +94,9 @@ class PycbcDetector(Detector[NDArray[np.float64]]):
     """PyCBC projection with an explicit sidereal angle."""
 
     def __init__(self, name: str, *, geometry: DetectorGeometry | None = None) -> None:
-        from pycbc.detector import Detector as GroundDetector
+        pycbc_detector_module = pytest.importorskip("pycbc.detector")
 
-        class SiderealDetector(GroundDetector):
+        class SiderealDetector(pycbc_detector_module.Detector):
             def gmst_estimate(
                 self, gps_time: NDArray[np.float64]
             ) -> NDArray[np.float64]:
@@ -151,14 +151,12 @@ class PycbcDetector(Detector[NDArray[np.float64]]):
 @pytest.fixture(scope="session")
 def pycbc_waveform() -> type[PycbcWaveform]:
     """Factory for a PyCBC waveform with the requested reference frequency."""
-    pytest.importorskip("pycbc.waveform")
     return PycbcWaveform
 
 
 @pytest.fixture(scope="session")
 def pycbc_detector() -> type[PycbcDetector]:
     """Factory for a named PyCBC detector, optionally with injstar geometry."""
-    pytest.importorskip("pycbc.detector")
     return PycbcDetector
 
 
