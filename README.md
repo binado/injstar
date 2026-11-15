@@ -74,7 +74,7 @@ index determines noise seeds and sky-map filenames. The spin components
 (`waveform_approximant`); a column the model does not read is ignored.
 Extra columns retain their original names in both output tables. Names reserved
 for generated output columns (including per-detector SNRs, detection flags,
-summary statistics and `skymap`) are rejected.
+and summary statistics) are rejected.
 
 Convert catalogues using source-frame masses or `luminosity_distance` to the
 required columns before running. Remove the obsolete

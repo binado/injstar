@@ -165,7 +165,7 @@ def build_summary(output_dir: Path) -> Path:
     """Join ``injections.h5`` with the statistics of every sky map present.
 
     Rows without a sky map (non-detections, or events not localized yet) get
-    NaN statistics and an empty ``skymap`` path.
+    NaN statistics and a false ``localized`` flag.
 
     Parameters
     ----------
@@ -181,7 +181,7 @@ def build_summary(output_dir: Path) -> Path:
     columns = read_population_catalogue(output_dir / io.INJECTIONS_FILE)
     count = len(columns["detected"])
     statistics = {name: np.full(count, np.nan) for name in statistic_names()}
-    paths = np.full(count, "", dtype=object)
+    localized = np.zeros(count, dtype=bool)
     for row in range(count):
         path = io.skymap_path(output_dir, row)
         if not path.is_file():
@@ -194,8 +194,7 @@ def build_summary(output_dir: Path) -> Path:
         )
         for name, value in values.items():
             statistics[name][row] = value
-        paths[row] = str(path.relative_to(output_dir))
-    columns["localized"] = paths != ""
+        localized[row] = True
+    columns["localized"] = localized
     columns.update(statistics)
-    columns["skymap"] = paths.astype(str)
     return io.write_table(output_dir / io.SUMMARY_FILE, columns)

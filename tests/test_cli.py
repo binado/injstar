@@ -158,7 +158,7 @@ def test_run_resume_and_summarise(config_file: Path, population_csv: Path) -> No
     np.testing.assert_array_equal(first["label"], [b"b", b"a", b"c"])
     np.testing.assert_array_equal(first["localized"], [True, False, True])
     assert np.isnan(first["area_90"][1])
-    assert first["skymap"][0] == b"skymaps/0.multiorder.fits"
+    assert "skymap" not in first
     assert np.all(first["area_90"][[0, 2]] > first["area_50"][[0, 2]])
 
     # A finished directory is not silently redone.
@@ -184,7 +184,7 @@ def test_run_resume_and_summarise(config_file: Path, population_csv: Path) -> No
 
 
 @pytest.mark.parametrize(
-    "name", ["network_snr", "expected_snr_H1", "area_90", "skymap"]
+    "name", ["network_snr", "expected_snr_H1", "area_90", "localized"]
 )
 def test_generated_column_collision_rejected(
     config_file: Path, population_csv: Path, name: str

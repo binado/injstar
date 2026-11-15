@@ -78,7 +78,6 @@ def load_inputs(config: RunConfig) -> Inputs:
         "network_snr",
         "detected",
         "localized",
-        "skymap",
         *products.statistic_names(),
     }
     for name in registry.members("selected"):
