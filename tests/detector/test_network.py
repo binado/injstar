@@ -22,7 +22,7 @@ def test_packaged_geometry_matches_lal(registry: DetectorRegistry, name: str) ->
 
     assert_close(geometry.location, reference.location)
     # LAL tabulates arm directions independently of the geodetic angles.
-    assert_close(geometry.response_tensor, reference.response)
+    assert_close(geometry.response_tensor, reference.response, promote_dtypes=True)
 
 
 def test_response_tensor_of_sixty_degree_arms() -> None:

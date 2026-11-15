@@ -65,6 +65,7 @@ def assert_close(
     *,
     rtol: Tolerance = None,
     atol: float = 0.0,
+    promote_dtypes: bool = False,
 ) -> None:
     """Assert that two arrays have the same shape and dtype and are close.
 
@@ -78,18 +79,23 @@ def assert_close(
         default.
     atol
         Absolute tolerance. It is zero unless a test asks for one.
+    promote_dtypes
+        Compare after promoting both arrays to their common dtype instead of
+        requiring equal dtypes. Use it against references stored at lower
+        precision, such as LAL's float32 response tensors. The tolerance still
+        comes from the original dtypes, so the less precise array governs.
 
     Raises
     ------
     AssertionError
-        If the shapes or dtypes differ, or the values are not close.
+        If the shapes differ, the dtypes differ and ``promote_dtypes`` is
+        false, or the values are not close.
     """
     actual, desired = np.asarray(actual), np.asarray(desired)
     assert actual.shape == desired.shape, (actual.shape, desired.shape)
+    rtol = max(tolerance(actual.dtype, rtol), tolerance(desired.dtype, rtol))
+    if promote_dtypes:
+        common = np.result_type(actual, desired)
+        actual, desired = actual.astype(common), desired.astype(common)
     assert actual.dtype == desired.dtype, (actual.dtype, desired.dtype)
-    np.testing.assert_allclose(
-        actual,
-        desired,
-        rtol=max(tolerance(actual.dtype, rtol), tolerance(desired.dtype, rtol)),
-        atol=atol,
-    )
+    np.testing.assert_allclose(actual, desired, rtol=rtol, atol=atol)

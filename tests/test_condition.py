@@ -108,7 +108,9 @@ def test_geodetic_responses_match_lal_tensors_to_1e_3(
     reference: Reference, event_and_network: tuple[Event, Network]
 ) -> None:
     # The audit records up to 3e-4 for H1 and L1 and 2e-3 for K1 (not in HLV).
-    assert_close(event_and_network[1].responses, reference.responses)
+    assert_close(
+        event_and_network[1].responses, reference.responses, promote_dtypes=True
+    )
 
 
 def test_horizons_match_lal_template_within_half_a_percent(
