@@ -74,6 +74,16 @@ class RunConfig(BaseModel):
         Population file (CSV or HDF5).
     output_dir
         Run directory.
+    waveform_approximant
+        Waveform model of the injected signal; any ripple frequency-domain
+        compact-binary model, including precessing and higher-mode ones.
+    template_approximant
+        Waveform model of the matched-filter template, which must be a
+        dominant-mode aligned-spin model (BAYESTAR's signal model is the
+        dominant mode). Defaults to ``waveform_approximant``, which then has to
+        be one itself.
+    reference_frequency
+        Reference frequency of the spins and phase in Hz.
     minimum_frequency, maximum_frequency
         Frequency band of the matched filter in Hz.
     sampling_frequency
@@ -99,6 +109,7 @@ class RunConfig(BaseModel):
     output_dir: Path
 
     waveform_approximant: str = "IMRPhenomD"
+    template_approximant: str | None = None
     reference_frequency: Positive = 20.0
     minimum_frequency: Positive = 20.0
     maximum_frequency: Positive = 1024.0

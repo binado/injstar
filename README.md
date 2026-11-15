@@ -71,6 +71,22 @@ tidal deformabilities `lambda_1` and `lambda_2` and the orbital phase
 Source-frame masses with `redshift` are accepted instead of detector-frame
 masses.
 
+### Waveform models
+
+`waveform_approximant` (default `IMRPhenomD`) names the ripple frequency-domain
+model of the injected signal. It may be precessing, tidal or include higher
+modes: the simulation projects the full plus and cross strain onto each
+detector. `template_approximant` (default: the same model) names the
+matched-filter template and the horizon, and must be a dominant-mode
+aligned-spin model, because BAYESTAR's signal model is the dominant mode. Set it
+when the signal is not one, for example `waveform_approximant = "IMRPhenomXPHM"`
+with `template_approximant = "IMRPhenomXAS"`.
+
+`inclination` is the angle between the orbital angular momentum (at
+`reference_frequency`) and the line of sight, as in LAL and ripple. For aligned
+spins this is the angle the BAYESTAR signal model uses; for a precessing signal
+it is not the angle between the total angular momentum and the line of sight.
+
 ### Detectors
 
 LIGO, Virgo, KAGRA, Einstein Telescope (triangle and 2L) and Cosmic Explorer

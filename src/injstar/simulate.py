@@ -1,34 +1,47 @@
 r"""SNR-level simulation.
 
 Batched JAX code that builds each detector's frequency-domain data, the
-template at its expected SNR plus Gaussian noise, and matched-filters it against
-the template with one inverse FFT per detector, plus detection flags.
+injected signal plus Gaussian noise, and matched-filters it against a template
+with one inverse FFT per detector, plus detection flags.
 
-For detector :math:`j`, with :math:`|h(f)|` the face-on amplitude at 1 Mpc and
-:math:`S_j` the one-sided PSD:
-
-.. math::
-
-    \sigma_j^2 = 4 \, \Delta f \sum_f \frac{|h(f)|^2}{S_j(f)}, \qquad
-    \mathrm{horizon}_j = \sigma_j \ [\mathrm{Mpc}]
+The signal and the template are separate waveform models. The template is the
+face-on plus polarization :math:`g(f)` of the template model at 1 Mpc, which
+must be a dominant-mode aligned-spin model because BAYESTAR's signal model is
+the dominant mode. With :math:`S_j` the one-sided PSD of detector :math:`j`:
 
 .. math::
 
-    \rho_j = \frac{\mathrm{horizon}_j}{d_L}
-    \left[ F_+ \frac{1 + \cos^2 \iota}{2} - i \, F_\times \cos \iota \right]
+    \sigma_j^2 = 4 \, \Delta f \sum_f \frac{|g(f)|^2}{S_j(f)}, \qquad
+    \mathrm{horizon}_j = \sigma_j \ [\mathrm{Mpc}], \qquad
+    \hat g_j = g / \sigma_j
+
+The signal is the full projected strain of the signal model, evaluated at the
+event's distance, inclination and phase, delayed to the arrival time
+:math:`t_j` at the detector:
 
 .. math::
 
-    z_j(t) = \rho_j \, A_j(t - t_j) + n_j(t), \qquad
-    \langle n \, n^* \rangle = 2 A_j
+    s_j(f) = \left[ F_+ h_+(f) + F_\times h_\times(f) \right]
+    e^{-2 \pi i f t_j}, \qquad
+    \rho_j = \sqrt{4 \, \Delta f \sum_f \frac{|s_j(f)|^2}{S_j(f)}}
 
-The sign of the cross term is BAYESTAR's signal model
-(``bayestar_signal_amplitude_model`` in ligo.skymap), which ripple's
-:math:`h_\times = -i \cos\iota \, h_+` also gives.
+.. math::
 
-The rectangle sum is used for :math:`\sigma_j` so that :math:`A_j(0) = 1` exactly
-on the grid; ligo.skymap's own horizon uses a trapezoid rule, which differs only by
-half of the two band-edge bins.
+    z_j(t) = \langle \hat g_j, s_j \rangle(t) + n_j(t), \qquad
+    \langle n \, n^* \rangle = 2 \, \delta
+
+where :math:`\langle \hat g_j, s_j \rangle(t)` is the noise-weighted
+inner product of the template with the signal shifted by :math:`t`. When the
+signal model is the template model, :math:`h_+ = \tfrac{1+\cos^2\iota}{2} g/d_L`
+and :math:`h_\times = -i \cos\iota \, g/d_L`, so the series peaks at
+:math:`\rho_j = (\mathrm{horizon}_j / d_L) \left[ F_+ \tfrac{1+\cos^2\iota}{2}
+- i F_\times \cos\iota \right]`, which is BAYESTAR's signal model
+(``bayestar_signal_amplitude_model`` in ligo.skymap). Otherwise
+:math:`\rho_j` bounds the series by the Cauchy-Schwarz inequality.
+
+The rectangle sum is used for :math:`\sigma_j` so that the series of the
+unit template peaks at exactly 1 on the grid; ligo.skymap's own horizon uses a
+trapezoid rule, which differs only by half of the two band-edge bins.
 
 The matched-filter quantities are the pure functions of
 :mod:`injstar.matched_filter`. Times are offsets from each event's geocentric
@@ -53,18 +66,18 @@ from injstar.detector.network import DetectorRegistry
 from injstar.waveform import Waveform
 from injstar.waveform import waveform as make_waveform
 
-#: Per-event inputs that do not depend on the waveform model, each an array over
-#: events. ``inclination`` and ``distance`` are listed because the projection onto
-#: the detectors is still written by hand rather than taken from the model.
+#: Per-event inputs that do not depend on the waveform models, each an array over
+#: events.
 EXTRINSIC_FIELDS = (
     "event_id",
     "right_ascension",
     "declination",
     "polarization_angle",
     "gmst",
-    "inclination",
-    "distance",
 )
+
+#: The template is the waveform seen face-on, at 1 Mpc and zero phase.
+_FACE_ON = {"distance": 1.0, "inclination": 0.0, "coa_phase": 0.0}
 
 #: Per-event outputs shared by :meth:`Simulator.snr` and :meth:`Simulator.series`,
 #: matching the fields of :class:`SnrResult`.
@@ -85,7 +98,8 @@ class SnrResult:
     Attributes
     ----------
     expected_snr
-        ``|rho_j|``, shape ``(events, detectors)``.
+        Optimal SNR of the injected signal, ``rho_j``, before noise, shape
+        ``(events, detectors)``.
     observed_snr
         Peak ``|z_j|`` of the cropped series, shape ``(events, detectors)``.
     horizon
@@ -148,22 +162,6 @@ def greenwich_sidereal_time(gps_times: NDArray[np.float64]) -> NDArray[np.float6
     )
 
 
-def _signal_spectrum(
-    unit_template: jax.Array,
-    *,
-    rho: jax.Array,
-    peak_time: jax.Array,
-    frequencies: jax.Array,
-) -> jax.Array:
-    """Frequency-domain data holding the template at the given SNR and time.
-
-    Matched-filtering it against the unit-norm template gives ``rho`` at
-    ``peak_time``. Shape ``(detectors, bins)``.
-    """
-    phase = -2 * jnp.pi * frequencies * peak_time[:, None]
-    return rho[:, None] * unit_template * (jnp.cos(phase) + 1j * jnp.sin(phase))
-
-
 def _noise_spectrum(
     white: jax.Array, *, inverse_psd: jax.Array, delta_f: float
 ) -> jax.Array:
@@ -205,7 +203,11 @@ class Simulator:
     crop_samples
         Odd number of samples in the cropped SNR series.
     waveform
-        Waveform model; its face-on plus polarization is the template.
+        Waveform model of the injected signal.
+    template
+        Waveform model of the matched-filter template; its face-on plus
+        polarization at 1 Mpc is the template and sets the horizon. Must be a
+        dominant-mode model.
     detector_snr, network_snr, min_detectors
         Detection rule: at least ``min_detectors`` detectors reach
         ``detector_snr`` and the network SNR reaches ``network_snr``.
@@ -230,6 +232,7 @@ class Simulator:
         segment_duration: float,
         crop_samples: int,
         waveform: Waveform,
+        template: Waveform,
         detector_snr: float,
         network_snr: float,
         min_detectors: int,
@@ -276,6 +279,7 @@ class Simulator:
         self._locations = locations
         self._half = crop_samples // 2
         self._waveform = waveform
+        self._template = template
         self._detector_snr = detector_snr
         self._network_snr = network_snr
         self._min_detectors = min_detectors
@@ -296,9 +300,10 @@ class Simulator:
         Raises
         ------
         ValueError
-            If the band holds fewer than three bins, the waveform model is
-            precessing or has modes above the dominant one, or a detector's PSD
-            does not cover the band.
+            If the band holds fewer than three bins, the template model is
+            precessing or has modes above the dominant one (set
+            ``template_approximant``), or a detector's PSD does not cover the
+            band.
         """
         names, responses, locations = registry.arrays(config.network)
 
@@ -319,10 +324,17 @@ class Simulator:
             config.waveform_approximant,
             reference_frequency=config.reference_frequency,
         )
-        if waveform.is_precessing or waveform.highest_mode > 2:
+        template_approximant = (
+            config.template_approximant or config.waveform_approximant
+        )
+        template = make_waveform(
+            template_approximant, reference_frequency=config.reference_frequency
+        )
+        if template.is_precessing or template.highest_mode > 2:
             raise ValueError(
-                f"waveform {config.waveform_approximant!r} is precessing or has "
-                "higher modes; only dominant-mode aligned-spin models are supported"
+                f"template {template_approximant!r} is precessing or has higher "
+                "modes; set template_approximant to a dominant-mode aligned-spin "
+                "model such as IMRPhenomXAS"
             )
         return cls(
             names=names,
@@ -335,6 +347,7 @@ class Simulator:
             segment_duration=config.segment_duration,
             crop_samples=config.crop_samples,
             waveform=waveform,
+            template=template,
             detector_snr=config.detection.detector_snr,
             network_snr=config.detection.network_snr,
             min_detectors=config.detection.min_detectors,
@@ -345,9 +358,15 @@ class Simulator:
 
     @property
     def event_fields(self) -> tuple[str, ...]:
-        """Per-event inputs: the extrinsic ones and those the waveform reads."""
+        """Per-event inputs: the extrinsic ones and those the models read."""
         return tuple(
-            dict.fromkeys((*EXTRINSIC_FIELDS, *self._waveform.parameter_names))
+            dict.fromkeys(
+                (
+                    *EXTRINSIC_FIELDS,
+                    *self._waveform.parameter_names,
+                    *self._template.parameter_names,
+                )
+            )
         )
 
     def _event(self, event: Mapping[str, jax.Array]) -> dict[str, jax.Array]:
@@ -356,11 +375,10 @@ class Simulator:
         inverse_psd = jnp.asarray(self._inverse_psd)
         n, df, rate = self.n_samples, self.delta_f, self.sampling_frequency
 
-        # The template is the face-on plus polarization at 1 Mpc.
-        source = {name: event[name] for name in self._waveform.parameter_names}
-        template, _ = self._waveform.polarizations(
+        # The template: the face-on plus polarization at 1 Mpc.
+        template, _ = self._template.polarizations(
             frequencies,
-            source | {"distance": 1.0, "inclination": 0.0, "coa_phase": 0.0},
+            {name: event[name] for name in self._template.parameter_names} | _FACE_ON,
         )
         sigma = matched_filter.optimal_snr(
             template, inverse_psd=inverse_psd, delta_f=df
@@ -370,12 +388,13 @@ class Simulator:
                 template, frequencies=frequencies, inverse_psd=inverse_psd
             )
         )
+        unit_template = template / jnp.where(sigma > 0, sigma, 1.0)[:, None]
 
         sky = {
             "right_ascension": event["right_ascension"],
             "declination": event["declination"],
         }
-        plus, cross = jax.vmap(
+        antenna_plus, antenna_cross = jax.vmap(
             lambda response: projection.antenna_pattern(
                 response,
                 event["gmst"],
@@ -389,17 +408,18 @@ class Simulator:
             )
         )(jnp.asarray(self._locations))
 
-        cos_inclination = jnp.cos(event["inclination"])
-        rho = (sigma / event["distance"]) * (
-            0.5 * (1 + cos_inclination**2) * plus - 1j * cos_inclination * cross
+        # The signal: the full projected strain, with the geocentric time on
+        # sample n // 2 of the periodic segment.
+        plus, cross = self._waveform.polarizations(
+            frequencies,
+            {name: event[name] for name in self._waveform.parameter_names},
         )
-
-        # The geocentric time sits on sample n // 2 of the periodic segment.
         peak_time = (n // 2) / rate + delay
-        unit_template = template / jnp.where(sigma > 0, sigma, 1.0)[:, None]
-        data = _signal_spectrum(
-            unit_template, rho=rho, peak_time=peak_time, frequencies=frequencies
+        phase = -2 * jnp.pi * frequencies * peak_time[:, None]
+        data = (antenna_plus[:, None] * plus + antenna_cross[:, None] * cross) * (
+            jnp.cos(phase) + 1j * jnp.sin(phase)
         )
+        expected = matched_filter.optimal_snr(data, inverse_psd=inverse_psd, delta_f=df)
         if self.noise:
             # The key depends only on the root key and the 64-bit event id.
             event_id = event["event_id"]
@@ -430,7 +450,7 @@ class Simulator:
         )
 
         return {
-            "expected_snr": jnp.abs(rho),
+            "expected_snr": expected,
             "observed_snr": observed,
             "horizon": sigma,
             "bandwidth": bandwidth,
