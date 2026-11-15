@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from injstar import products
+from injstar import io, products
 from injstar.config import RunConfig
 from injstar.detector.network import DetectorRegistry, load_detector_config
 from injstar.population import Population, read_population, simulation_events
@@ -86,7 +86,7 @@ def _results_key(config: Mapping[str, Any]) -> dict[str, Any]:
 def _prepare_directory(config: RunConfig, *, overwrite: bool) -> bool:
     """Make the output directory usable; return whether it holds this run."""
     output_dir = config.output_dir
-    snapshot = output_dir / products.CONFIG_FILE
+    snapshot = output_dir / io.CONFIG_FILE
     occupied = output_dir.exists() and any(output_dir.iterdir())
     recorded = json.loads(snapshot.read_text()) if snapshot.is_file() else None
     requested = config.model_dump(mode="json")
@@ -114,7 +114,7 @@ def _prepare_directory(config: RunConfig, *, overwrite: bool) -> bool:
 
 def _write_config(config: RunConfig) -> None:
     """Record the config in the run directory."""
-    (config.output_dir / products.CONFIG_FILE).write_text(
+    (config.output_dir / io.CONFIG_FILE).write_text(
         config.model_dump_json(indent=2) + "\n"
     )
 
@@ -156,7 +156,7 @@ def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
         false.
     """
     inputs = load_inputs(config)
-    target = config.output_dir / products.INJECTIONS_FILE
+    target = config.output_dir / io.INJECTIONS_FILE
     if _prepare_directory(config, overwrite=overwrite) and target.is_file():
         logger.info("reusing %s", target)
         return target
@@ -172,7 +172,7 @@ def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
     columns["detected"] = result.detected
 
     _write_config(config)
-    products.write_table(target, columns)
+    io.write_table(target, columns)
     logger.info(
         "%d of %d injections detected", int(result.detected.sum()), len(result.detected)
     )
@@ -185,7 +185,7 @@ def _pending(output_dir: Path, event_ids: np.ndarray) -> np.ndarray:
         [
             index
             for index, event_id in enumerate(event_ids)
-            if not products.skymap_path(output_dir, int(event_id)).is_file()
+            if not io.skymap_path(output_dir, int(event_id)).is_file()
         ],
         dtype=int,
     )
@@ -229,7 +229,7 @@ def run(config: RunConfig, *, overwrite: bool = False, resume: bool = False) -> 
         )
 
     inputs = load_inputs(config)
-    columns, _ = products.read_table(output_dir / products.INJECTIONS_FILE)
+    columns, _ = io.read_table(output_dir / io.INJECTIONS_FILE)
     detected = np.flatnonzero(columns["detected"])
     todo = detected[_pending(output_dir, columns["event_id"][detected])]
     logger.info(
@@ -300,6 +300,6 @@ def summarise(output_dir: Path) -> Path:
         If the directory has no ``injections.h5``.
     """
     output_dir = Path(output_dir)
-    if not (output_dir / products.INJECTIONS_FILE).is_file():
-        raise RunDirectoryError(f"{output_dir} has no {products.INJECTIONS_FILE}")
+    if not (output_dir / io.INJECTIONS_FILE).is_file():
+        raise RunDirectoryError(f"{output_dir} has no {io.INJECTIONS_FILE}")
     return products.build_summary(output_dir)

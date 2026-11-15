@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from injstar import products
+from injstar import io
 from injstar.cli import app
 from injstar.config import RunConfig, load_run_config
 
@@ -37,8 +37,8 @@ def test_named_network_matches_explicit_detectors(config_file: Path) -> None:
     code, output = invoke("snr", config_file, "--output-dir", named)
     assert code == 0, output
 
-    expected, _ = products.read_table(explicit / "injections.h5")
-    actual, _ = products.read_table(named / "injections.h5")
+    expected, _ = io.read_table(explicit / "injections.h5")
+    actual, _ = io.read_table(named / "injections.h5")
     assert actual.keys() == expected.keys()
     for name, values in expected.items():
         np.testing.assert_array_equal(actual[name], values)
@@ -53,7 +53,7 @@ def test_snr_writes_injections_and_no_maps(config_file: Path) -> None:
     assert sorted(path.name for path in out.iterdir()) == [
         "config.json", "injections.h5",
     ]  # fmt: skip
-    columns, _ = products.read_table(out / "injections.h5")
+    columns, _ = io.read_table(out / "injections.h5")
     for name in ("expected_snr_H1", "observed_snr_V1", "horizon_L1", "network_snr"):
         assert columns[name].shape == (3,)
     np.testing.assert_array_equal(columns["detected"], [True, False, True])
@@ -79,8 +79,8 @@ def test_snr_ignores_snr_columns_in_the_population(
     code, output = invoke("snr", config_file, "--output-dir", tmp_path / "bogus")
 
     assert code == 0, output
-    plain, _ = products.read_table(tmp_path / "plain" / "injections.h5")
-    bogus, _ = products.read_table(tmp_path / "bogus" / "injections.h5")
+    plain, _ = io.read_table(tmp_path / "plain" / "injections.h5")
+    bogus, _ = io.read_table(tmp_path / "bogus" / "injections.h5")
     np.testing.assert_array_equal(bogus["population_snr"], [999.0] * 3)
     for name, values in plain.items():
         np.testing.assert_array_equal(bogus[name], values)
@@ -135,7 +135,7 @@ def test_run_resume_and_summarise(config_file: Path) -> None:
     assert code == 0, output
     maps = sorted(path.name for path in (out / "skymaps").iterdir())
     assert maps == ["0.multiorder.fits", "2.multiorder.fits"]
-    first, _ = products.read_table(out / "summary.h5")
+    first, _ = io.read_table(out / "summary.h5")
     np.testing.assert_array_equal(first["localized"], [True, False, True])
     assert np.isnan(first["area_90"][1])
     assert first["skymap"][0] == "skymaps/0.multiorder.fits"
@@ -152,12 +152,12 @@ def test_run_resume_and_summarise(config_file: Path) -> None:
 
     assert code == 0, output
     assert (out / "skymaps" / "0.multiorder.fits").stat().st_mtime_ns == kept
-    resumed, _ = products.read_table(out / "summary.h5")
+    resumed, _ = io.read_table(out / "summary.h5")
     for name, values in first.items():
         np.testing.assert_array_equal(resumed[name], values)
 
     (out / "summary.h5").unlink()
     assert invoke("summarise", out)[0] == 0
-    rebuilt, _ = products.read_table(out / "summary.h5")
+    rebuilt, _ = io.read_table(out / "summary.h5")
     for name, values in first.items():
         np.testing.assert_array_equal(rebuilt[name], values)
