@@ -5,11 +5,98 @@ GPS, epoch, or precession conversion is performed. Angles are radians,
 locations metres and delays seconds. Source coordinates and gmst broadcast.
 """
 
+from dataclasses import dataclass
+from typing import Protocol
+
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
 from injstar.constants import SPEED_OF_LIGHT_M_S
+from injstar.detector.network import DetectorGeometry
+
+
+class Detector[ArrayT](Protocol):
+    """Geometry and sky projection for one configured detector."""
+
+    def response_tensor(self) -> ArrayT:
+        """Return the Earth-fixed response tensor of shape ``(3, 3)``."""
+        ...
+
+    def location(self) -> ArrayT:
+        """Return the Earth-fixed vertex of shape ``(3,)`` in metres."""
+        ...
+
+    def antenna_pattern(
+        self,
+        gmst: ArrayT | float,
+        *,
+        right_ascension: ArrayT | float,
+        declination: ArrayT | float,
+        polarization_angle: ArrayT | float,
+    ) -> tuple[ArrayT, ArrayT]:
+        """Return the LAL plus and cross factors for broadcast angles in radians."""
+        ...
+
+    def time_delay_from_geocenter(
+        self,
+        gmst: ArrayT | float,
+        *,
+        right_ascension: ArrayT | float,
+        declination: ArrayT | float,
+    ) -> ArrayT:
+        """Return detector arrival minus geocentric arrival in seconds.
+
+        The sky coordinates and GMST are broadcast angles in radians.
+        """
+        ...
+
+
+@dataclass(frozen=True)
+class GroundDetector:
+    """Projection for one ground-based detector with fixed geodetic geometry."""
+
+    geometry: DetectorGeometry
+
+    def response_tensor(self) -> jax.Array:
+        """Return the Earth-fixed response tensor."""
+        return jnp.asarray(self.geometry.response_tensor)
+
+    def location(self) -> jax.Array:
+        """Return the Earth-fixed vertex in metres."""
+        return jnp.asarray(self.geometry.location)
+
+    def antenna_pattern(
+        self,
+        gmst: ArrayLike,
+        *,
+        right_ascension: ArrayLike,
+        declination: ArrayLike,
+        polarization_angle: ArrayLike,
+    ) -> tuple[jax.Array, jax.Array]:
+        """Return the LAL plus and cross factors for broadcast angles in radians."""
+        return antenna_pattern(
+            self.response_tensor(),
+            gmst,
+            right_ascension=right_ascension,
+            declination=declination,
+            polarization_angle=polarization_angle,
+        )
+
+    def time_delay_from_geocenter(
+        self,
+        gmst: ArrayLike,
+        *,
+        right_ascension: ArrayLike,
+        declination: ArrayLike,
+    ) -> jax.Array:
+        """Return detector arrival minus geocentric arrival in seconds."""
+        return time_delay_from_geocenter(
+            self.location(),
+            gmst,
+            right_ascension=right_ascension,
+            declination=declination,
+        )
 
 
 def antenna_pattern(
