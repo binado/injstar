@@ -7,7 +7,7 @@ translates between the canonical population column names (``distance``,
 assumes which parameters a model needs: whether it is aligned-spin, precessing
 or tidal is read from the model.
 
-:meth:`WaveformGenerator.__call__` evaluates one source and returns the complex
+:meth:`RippleWaveformGenerator.__call__` evaluates one source and returns the complex
 plus and cross polarizations at the given frequencies. For the dominant mode
 they obey :math:`h_\times = -i \, 2\cos\iota / (1 + \cos^2\iota) \, h_+`;
 face-on this is :math:`h_\times = -i h_+`.
@@ -18,12 +18,34 @@ first.
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import jax
 import jax.numpy as jnp
 import ripplegw
 import ripplegw.conversions
 from numpy.typing import ArrayLike
+
+
+class WaveformGenerator[ArrayT](Protocol):
+    """One configured frequency-domain compact-binary model."""
+
+    @property
+    def parameter_names(self) -> tuple[str, ...]:
+        """Canonical population columns required by the model."""
+        ...
+
+    def __call__(
+        self, frequencies: ArrayT, source: Mapping[str, ArrayT | float]
+    ) -> tuple[ArrayT, ArrayT]:
+        """Return complex plus and cross strain on the supplied FFT bins.
+
+        Frequencies are in Hz, masses are detector-frame solar masses,
+        distance is in Mpc, and angles are in radians. The polarizations use
+        the LAL convention with no detector projection or arrival-time shift.
+        """
+        ...
+
 
 #: Canonical population columns the models read, by the name ripple gives them.
 #: The two detector-frame masses are not listed: they enter as the chirp mass
@@ -47,7 +69,7 @@ _CANONICAL_NAMES = {ripple: name for name, ripple in _RIPPLE_NAMES.items()}
 
 
 @dataclass(frozen=True)
-class WaveformGenerator:
+class RippleWaveformGenerator:
     """A frequency-domain compact-binary waveform model.
 
     Construct directly or build it with :func:`waveform`.
@@ -157,7 +179,9 @@ def _canonical_names(ripple_names: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(names)
 
 
-def waveform(approximant: str, *, reference_frequency: float) -> WaveformGenerator:
+def waveform(
+    approximant: str, *, reference_frequency: float
+) -> RippleWaveformGenerator:
     """Build a frequency-domain waveform model.
 
     Parameters
@@ -174,7 +198,7 @@ def waveform(approximant: str, *, reference_frequency: float) -> WaveformGenerat
         If the approximant is unknown, or the model reads a parameter with no
         population column.
     """
-    return WaveformGenerator(
+    return RippleWaveformGenerator(
         approximant=approximant,
         reference_frequency=reference_frequency,
     )

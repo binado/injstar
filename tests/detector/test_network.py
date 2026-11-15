@@ -12,15 +12,17 @@ from injstar.detector.network import (
 )
 from injstar.detector.psd import NOISE_CURVES_BASE_DIR
 
+from ..tolerances import assert_close
+
 
 @pytest.mark.parametrize("name", ["H1", "L1", "V1", "K1"])
 def test_packaged_geometry_matches_lal(registry: DetectorRegistry, name: str) -> None:
     geometry = registry.detectors[name].geometry
     reference = lal.cached_detector_by_prefix[name]
 
-    np.testing.assert_allclose(geometry.location, reference.location, atol=1e-3)
+    assert_close(geometry.location, reference.location)
     # LAL tabulates arm directions independently of the geodetic angles.
-    np.testing.assert_allclose(geometry.response_tensor, reference.response, atol=3e-3)
+    assert_close(geometry.response_tensor, reference.response, promote_dtypes=True)
 
 
 def test_response_tensor_of_sixty_degree_arms() -> None:
@@ -36,7 +38,7 @@ def test_response_tensor_of_sixty_degree_arms() -> None:
     y = np.array([0.0, np.sin(np.pi / 3), np.cos(np.pi / 3)])
     expected = (np.outer(x, x) - np.outer(y, y)) / 2
 
-    np.testing.assert_allclose(geometry.response_tensor, expected, atol=1e-15)
+    assert_close(geometry.response_tensor, expected)
     assert np.trace(geometry.response_tensor) == pytest.approx(0.0, abs=1e-15)
 
 
@@ -82,10 +84,9 @@ def test_user_layer_adds_detector_and_network(tmp_path: Path) -> None:
     # The packaged H1 geometry survives the override of its PSD.
     assert registry.detectors["H1"].geometry.elevation_m == pytest.approx(142.554)
     frequencies = np.array([1.0, 30.0, 100.0, 1e6])
-    np.testing.assert_allclose(
+    assert_close(
         registry.detectors["X1"].sensitivity(frequencies),
         load_detector_config().detectors["H1"].sensitivity(frequencies),
-        rtol=1e-12,
     )
 
 

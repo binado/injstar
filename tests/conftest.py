@@ -1,13 +1,21 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from injstar.config import RunConfig
-from injstar.detector.network import DetectorRegistry, load_detector_config
+from injstar.detector.network import (
+    DetectorGeometry,
+    DetectorRegistry,
+    load_detector_config,
+)
+from injstar.detector.projection import Detector
 from injstar.localize import Event, Network
 from injstar.population import read_population, simulation_events
 from injstar.runtime import configure_runtime
 from injstar.simulate import Simulator, greenwich_sidereal_time
+from injstar.waveform.pycbc import PyCBCWaveformGenerator
 
 # 64-bit JAX has to be chosen before any test touches the backend.
 configure_runtime()
@@ -21,6 +29,76 @@ POPULATION_ROWS = (
     "30.0,25.0,0.1,-0.1,40000.0,2.0,0.6,1.2,1.0,1400000100.5",
     "1.4,1.3,0.0,0.0,200.0,4.0,-1.0,2.6,0.1,1400000200.25",
 )
+
+
+class PycbcDetector(Detector[NDArray[np.float64]]):
+    """PyCBC projection with an explicit sidereal angle."""
+
+    def __init__(self, name: str, *, geometry: DetectorGeometry | None = None) -> None:
+        from pycbc.detector import Detector as PycbcGroundDetector
+
+        class SiderealDetector(PycbcGroundDetector):
+            def gmst_estimate(
+                self, gps_time: NDArray[np.float64]
+            ) -> NDArray[np.float64]:
+                # The projection entry points pass their time argument through
+                # here. Supply GMST directly to use the same angle as injstar.
+                return gps_time
+
+        self._detector = SiderealDetector(name)
+        if geometry is not None:
+            self._detector.response = geometry.response_tensor
+            self._detector.location = geometry.location
+
+    def response_tensor(self) -> NDArray[np.float64]:
+        return np.asarray(self._detector.response, dtype=np.float64)
+
+    def location(self) -> NDArray[np.float64]:
+        return np.asarray(self._detector.location, dtype=np.float64)
+
+    def antenna_pattern(
+        self,
+        gmst: NDArray[np.float64] | float,
+        *,
+        right_ascension: NDArray[np.float64] | float,
+        declination: NDArray[np.float64] | float,
+        polarization_angle: NDArray[np.float64] | float,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        ra, dec, psi, sidereal = np.broadcast_arrays(
+            right_ascension, declination, polarization_angle, gmst
+        )
+        plus, cross = self._detector.antenna_pattern(
+            ra.ravel(), dec.ravel(), psi.ravel(), sidereal.ravel()
+        )
+        return (
+            np.asarray(plus, dtype=np.float64).reshape(ra.shape),
+            np.asarray(cross, dtype=np.float64).reshape(ra.shape),
+        )
+
+    def time_delay_from_geocenter(
+        self,
+        gmst: NDArray[np.float64] | float,
+        *,
+        right_ascension: NDArray[np.float64] | float,
+        declination: NDArray[np.float64] | float,
+    ) -> NDArray[np.float64]:
+        ra, dec, sidereal = np.broadcast_arrays(right_ascension, declination, gmst)
+        delay = self._detector.time_delay_from_earth_center(
+            ra.ravel(), dec.ravel(), sidereal.ravel()
+        )
+        return np.asarray(delay, dtype=np.float64).reshape(ra.shape)
+
+
+@pytest.fixture(scope="session")
+def pycbc_waveform() -> type[PyCBCWaveformGenerator]:
+    """Factory for a PyCBC waveform with the requested model and reference frequency."""
+    return PyCBCWaveformGenerator
+
+
+@pytest.fixture(scope="session")
+def pycbc_detector() -> type[PycbcDetector]:
+    """Factory for a named PyCBC detector, optionally with injstar geometry."""
+    return PycbcDetector
 
 
 @pytest.fixture(scope="session")

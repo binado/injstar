@@ -1023,6 +1023,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+pycbc = [
+    { name = "lalsuite" },
+    { name = "pycbc" },
+]
 validation = [
     { name = "gwmock-signal", marker = "python_full_version >= '3.13'" },
     { name = "pycbc" },
@@ -1031,6 +1035,7 @@ validation = [
 [package.dev-dependencies]
 dev = [
     { name = "prek" },
+    { name = "pycbc" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
@@ -1047,17 +1052,20 @@ requires-dist = [
     { name = "gwmock-noise", specifier = ">=0.17.0" },
     { name = "gwmock-signal", marker = "python_full_version >= '3.13' and extra == 'validation'", specifier = ">=0.24.0" },
     { name = "jax", specifier = ">=0.12.0.1" },
+    { name = "lalsuite", marker = "extra == 'pycbc'" },
     { name = "ligo-skymap", specifier = ">=2.5.4" },
+    { name = "pycbc", marker = "extra == 'pycbc'", specifier = ">=2.11.0" },
     { name = "pycbc", marker = "extra == 'validation'", specifier = ">=2.11.0" },
     { name = "pydantic", specifier = ">=2.14.3" },
     { name = "ripplegw", specifier = ">=0.5.1" },
     { name = "typer", specifier = ">=0.29.1" },
 ]
-provides-extras = ["validation"]
+provides-extras = ["pycbc", "validation"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "prek", specifier = ">=0.5.3" },
+    { name = "pycbc", specifier = ">=2.11.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.0" },
