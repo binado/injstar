@@ -34,9 +34,10 @@ POPULATION_ROWS = (
 
 
 @dataclass(frozen=True)
-class PycbcWaveform(WaveformGenerator[np.ndarray]):
-    """PyCBC's aligned-spin IMRPhenomD reference model."""
+class PyCBCWaveformGenerator(WaveformGenerator[np.ndarray]):
+    """PyCBC reference generator for aligned-spin frequency-domain models."""
 
+    approximant: str
     reference_frequency: float
 
     @property
@@ -69,7 +70,7 @@ class PycbcWaveform(WaveformGenerator[np.ndarray]):
             raise ValueError("expected contiguous bins on a zero-origin FFT grid")
 
         plus, cross = get_fd_waveform(
-            approximant="IMRPhenomD",
+            approximant=self.approximant,
             mass1=float(source["detector_frame_mass_1"]),
             mass2=float(source["detector_frame_mass_2"]),
             spin1z=float(source["spin_1z"]),
@@ -149,9 +150,9 @@ class PycbcDetector(Detector[NDArray[np.float64]]):
 
 
 @pytest.fixture(scope="session")
-def pycbc_waveform() -> type[PycbcWaveform]:
-    """Factory for a PyCBC waveform with the requested reference frequency."""
-    return PycbcWaveform
+def pycbc_waveform() -> type[PyCBCWaveformGenerator]:
+    """Factory for a PyCBC waveform with the requested model and reference frequency."""
+    return PyCBCWaveformGenerator
 
 
 @pytest.fixture(scope="session")
