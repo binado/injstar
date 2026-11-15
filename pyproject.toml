@@ -55,6 +55,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "prek>=0.5.3",
+    "pycbc>=2.11.0",
     "ruff>=0.16.0",
     "ty>=0.0.83",
     { include-group = "test" },

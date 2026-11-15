@@ -1031,6 +1031,7 @@ validation = [
 [package.dev-dependencies]
 dev = [
     { name = "prek" },
+    { name = "pycbc" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
@@ -1058,6 +1059,7 @@ provides-extras = ["validation"]
 [package.metadata.requires-dev]
 dev = [
     { name = "prek", specifier = ">=0.5.3" },
+    { name = "pycbc", specifier = ">=2.11.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.0" },
