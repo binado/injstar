@@ -119,6 +119,6 @@ def skymap_path(output_dir: Path, event_id: int) -> Path:
     output_dir
         Run directory.
     event_id
-        Identifier from the population.
+        Zero-based input row index.
     """
     return Path(output_dir) / "skymaps" / f"{int(event_id)}.multiorder.fits"

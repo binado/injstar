@@ -96,9 +96,6 @@ class RunConfig(BaseModel):
         Length in seconds of the SNR series handed to BAYESTAR.
     noise
         Whether to add Gaussian noise to the SNR series.
-    population_cosmology
-        Name of an astropy cosmology, used only when the population gives
-        source-frame masses and redshift.
     """
 
     model_config = _STRICT
@@ -121,7 +118,6 @@ class RunConfig(BaseModel):
     detection: DetectionConfig = DetectionConfig()
     prior: PriorConfig
     rescale_loglikelihood: Positive = 1.0
-    population_cosmology: str = "Planck18"
 
     seed: Annotated[int, Field(ge=0)] = 0
     batch_size: Annotated[int, Field(ge=1)] = 32

@@ -72,9 +72,23 @@ def load_inputs(config: RunConfig) -> Inputs:
         Run configuration.
     """
     registry = load_detector_config(config.detector_config).select(config.network)
-    population = read_population(
-        config.population, cosmology=config.population_cosmology
-    )
+    population = read_population(config.population)
+    generated = {
+        "network_snr",
+        "detected",
+        "localized",
+        "skymap",
+        *products.statistic_names(),
+    }
+    for name in registry.members("selected"):
+        generated.update(
+            f"{prefix}_{name}" for prefix in ("expected_snr", "observed_snr", "horizon")
+        )
+    collisions = generated.intersection(population)
+    if collisions:
+        raise ValueError(
+            f"population columns collide with generated outputs: {sorted(collisions)}"
+        )
     return Inputs(config, registry, population)
 
 
