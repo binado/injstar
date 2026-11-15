@@ -15,6 +15,7 @@ MODULES = [
     "detector.psd",
     "pipeline",
     "population",
+    "io",
     "products",
     "runtime",
     "simulate",

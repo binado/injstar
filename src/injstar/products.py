@@ -1,141 +1,22 @@
 """Run products.
 
-Reads and writes the tables of a run directory (``injections.h5`` and
-``summary.h5``, one row per injection, non-detections included) and computes
-the per-map statistics that make up the summary.
-
-A table is an HDF5 file with one dataset per column, written beside its
-destination and renamed onto it.
+Computes per-map statistics and joins them with the injection table to build
+``summary.h5``, including one row per injection and non-detections.
 
 Nothing here imports JAX.
 """
 
-import json
-import os
-import tempfile
-from collections.abc import Callable, Generator, Mapping
-from contextlib import contextmanager
-from datetime import UTC, datetime
+from collections.abc import Callable
 from pathlib import Path
 
-import h5py
 import numpy as np
 from numpy.typing import NDArray
 
-from injstar import __version__
-
-INJECTIONS_FILE = "injections.h5"
-SUMMARY_FILE = "summary.h5"
-CONFIG_FILE = "config.json"
+from injstar import io
 
 #: Credible levels of the sky areas and distance quantiles in the summary.
 CONTOUR_LEVELS = (0.5, 0.9)
 DISTANCE_QUANTILES = (0.05, 0.5, 0.95)
-
-Columns = dict[str, NDArray]
-
-
-@contextmanager
-def atomic_h5(path: Path) -> Generator[h5py.File]:
-    """An ``h5py.File`` open for writing beside ``path``, renamed onto it on success.
-
-    A reader sees no file at ``path`` or a complete one: if the body raises,
-    the temporary file is removed and ``path`` is left as it was.
-
-    Parameters
-    ----------
-    path
-        File path.
-    """
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    handle, temporary = tempfile.mkstemp(
-        dir=target.parent, prefix=f".{target.stem}.", suffix=".h5.tmp"
-    )
-    os.close(handle)
-    try:
-        with h5py.File(temporary, "w") as file:
-            yield file
-        os.replace(temporary, target)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
-
-
-def write_table(path: Path, columns: Mapping[str, NDArray], **attrs: str) -> Path:
-    """Write equal-length columns as one HDF5 dataset each.
-
-    Parameters
-    ----------
-    path
-        Destination file.
-    columns
-        Column name to 1-D array. Text columns are stored as UTF-8 bytes.
-    **attrs
-        String attributes recorded on the file, beside ``version`` and
-        ``created``.
-
-    Raises
-    ------
-    ValueError
-        If the columns differ in length.
-    """
-    arrays = {name: np.asarray(values) for name, values in columns.items()}
-    if len({len(values) for values in arrays.values()}) > 1:
-        raise ValueError("table columns have different lengths")
-    with atomic_h5(path) as file:
-        file.attrs["version"] = __version__
-        file.attrs["created"] = datetime.now(UTC).isoformat()
-        for name, value in attrs.items():
-            file.attrs[name] = value
-        file.attrs["columns"] = json.dumps(list(arrays))
-        for name, values in arrays.items():
-            if values.dtype.kind == "U":
-                values = np.char.encode(values, "utf-8")
-            file.create_dataset(name, data=values)
-    return Path(path)
-
-
-def read_table(path: Path) -> tuple[Columns, dict[str, str]]:
-    """Read a file :func:`write_table` made.
-
-    Parameters
-    ----------
-    path
-        Table file.
-
-    Returns
-    -------
-    columns : dict of str to ndarray
-        Columns in the order they were written; text columns as ``str``.
-    attrs : dict of str to str
-        File attributes.
-    """
-    with h5py.File(path, "r") as file:
-        attrs = {
-            name: value.decode() if isinstance(value, bytes) else str(value)
-            for name, value in file.attrs.items()
-        }
-        columns: Columns = {}
-        for name in json.loads(attrs.pop("columns")):
-            values = np.asarray(file[name][()])
-            if values.dtype.kind == "S":
-                values = np.char.decode(values, "utf-8")
-            columns[name] = values
-    return columns, attrs
-
-
-def skymap_path(output_dir: Path, event_id: int) -> Path:
-    """Where the sky map of ``event_id`` lives in a run directory.
-
-    Parameters
-    ----------
-    output_dir
-        Run directory.
-    event_id
-        Identifier from the population.
-    """
-    return Path(output_dir) / "skymaps" / f"{int(event_id)}.multiorder.fits"
 
 
 def statistic_names() -> tuple[str, ...]:
@@ -296,12 +177,12 @@ def build_summary(output_dir: Path) -> Path:
         The written ``summary.h5``.
     """
     output_dir = Path(output_dir)
-    columns, _ = read_table(output_dir / INJECTIONS_FILE)
+    columns, _ = io.read_table(output_dir / io.INJECTIONS_FILE)
     count = len(columns["event_id"])
     statistics = {name: np.full(count, np.nan) for name in statistic_names()}
     paths = np.full(count, "", dtype=object)
     for row, event_id in enumerate(columns["event_id"]):
-        path = skymap_path(output_dir, int(event_id))
+        path = io.skymap_path(output_dir, int(event_id))
         if not path.is_file():
             continue
         values = map_statistics(
@@ -316,4 +197,4 @@ def build_summary(output_dir: Path) -> Path:
     columns["localized"] = paths != ""
     columns.update(statistics)
     columns["skymap"] = paths.astype(str)
-    return write_table(output_dir / SUMMARY_FILE, columns)
+    return io.write_table(output_dir / io.SUMMARY_FILE, columns)

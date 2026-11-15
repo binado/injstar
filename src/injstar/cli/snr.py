@@ -22,12 +22,12 @@ def snr(
     """Compute the SNRs and detection flags of every injection."""
 
     def stage() -> None:
-        from injstar import pipeline, products
+        from injstar import io, pipeline
         from injstar.config import load_run_config
 
         loaded = load_run_config(config, output_dir=output_dir, seed=seed)
         path = pipeline.compute_snr(loaded, overwrite=overwrite)
-        columns, _ = products.read_table(path)
+        columns, _ = io.read_table(path)
         detected = int(columns["detected"].sum())
         typer.echo(f"{detected} of {len(columns['detected'])} injections detected")
         typer.echo(path)

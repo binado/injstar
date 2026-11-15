@@ -29,7 +29,7 @@ from numpy.typing import NDArray
 from injstar import __version__
 from injstar.config import PriorConfig
 from injstar.constants import ARRIVAL_TIME_MARGIN_S, SPEED_OF_LIGHT_M_S
-from injstar.products import skymap_path
+from injstar.io import skymap_path
 
 
 @dataclass(frozen=True)
