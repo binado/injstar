@@ -171,7 +171,8 @@ def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
     """
     inputs = load_inputs(config)
     target = config.output_dir / io.INJECTIONS_FILE
-    if _prepare_directory(config, overwrite=overwrite) and target.is_file():
+    reused = _prepare_directory(config, overwrite=overwrite)
+    if reused and target.is_file() and (config.output_dir / io.SNR_FILE).is_file():
         logger.info("reusing %s", target)
         return target
 
@@ -187,6 +188,7 @@ def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
 
     _write_config(config)
     io.write_table(target, columns)
+    result.write_csv(config.output_dir / io.SNR_FILE)
     logger.info(
         "%d of %d injections detected", int(result.detected.sum()), len(result.detected)
     )

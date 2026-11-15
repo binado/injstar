@@ -61,6 +61,7 @@ from numpy.typing import NDArray
 
 from injstar import matched_filter
 from injstar.config import RunConfig
+from injstar.dataset import SCALAR_FIELDS, SNRDataset
 from injstar.detector import projection
 from injstar.detector.network import DetectorRegistry
 from injstar.waveform import WaveformGenerator
@@ -78,48 +79,6 @@ EXTRINSIC_FIELDS = (
 #: The template is the waveform seen face-on, at 1 Mpc and zero phase.
 _FACE_ON = {"distance": 1.0, "inclination": 0.0, "coa_phase": 0.0}
 
-#: Per-event outputs shared by :meth:`Simulator.snr` and :meth:`Simulator.series`,
-#: matching the fields of :class:`SnrResult`.
-SCALAR_FIELDS = (
-    "expected_snr",
-    "observed_snr",
-    "horizon",
-    "bandwidth",
-    "network_snr",
-    "detected",
-)
-
-
-@dataclass(frozen=True)
-class SnrResult:
-    """Scalar outputs for a set of events; arrays lead with the event axis.
-
-    Attributes
-    ----------
-    expected_snr
-        Optimal SNR of the injected signal, ``rho_j``, before noise, shape
-        ``(events, detectors)``.
-    observed_snr
-        Peak ``|z_j|`` of the cropped series, shape ``(events, detectors)``.
-    horizon
-        SNR = 1 distances in Mpc, shape ``(events, detectors)``.
-    bandwidth
-        RMS angular-frequency bandwidth in rad/s, shape
-        ``(events, detectors)``; the timing uncertainty at SNR ``s`` is
-        ``1 / (s * bandwidth)``.
-    network_snr
-        Root sum square of ``observed_snr``, shape ``(events,)``.
-    detected
-        Detection flag, shape ``(events,)``.
-    """
-
-    expected_snr: NDArray[np.float64]
-    observed_snr: NDArray[np.float64]
-    horizon: NDArray[np.float64]
-    bandwidth: NDArray[np.float64]
-    network_snr: NDArray[np.float64]
-    detected: NDArray[np.bool_]
-
 
 @dataclass(frozen=True)
 class SeriesResult:
@@ -128,7 +87,7 @@ class SeriesResult:
     Attributes
     ----------
     scalars
-        The matching :class:`SnrResult`.
+        The matching :class:`SNRDataset`.
     series
         Complex SNR, shape ``(events, detectors, crop_samples)``.
     epochs
@@ -136,7 +95,7 @@ class SeriesResult:
         coalescence time, in seconds, shape ``(events, detectors)``.
     """
 
-    scalars: SnrResult
+    scalars: SNRDataset
     series: NDArray[np.complex128]
     epochs: NDArray[np.float64]
 
@@ -499,7 +458,7 @@ class Simulator:
 
     def snr(
         self, events: Mapping[str, NDArray], *, rows: NDArray | None = None
-    ) -> SnrResult:
+    ) -> SNRDataset:
         """Expected and observed SNRs and detection flags.
 
         Parameters
@@ -512,7 +471,9 @@ class Simulator:
             Original zero-based row indices used to seed noise. Defaults to
             consecutive indices in input order.
         """
-        return SnrResult(**self._run(events, SCALAR_FIELDS, rows))
+        return SNRDataset.from_arrays(
+            self._run(events, SCALAR_FIELDS, rows), self.names, rows
+        )
 
     def series(
         self, events: Mapping[str, NDArray], *, rows: NDArray | None = None
@@ -528,4 +489,6 @@ class Simulator:
         """
         output = self._run(events, (*SCALAR_FIELDS, "series", "epochs"), rows)
         series, epochs = output.pop("series"), output.pop("epochs")
-        return SeriesResult(SnrResult(**output), series, epochs)
+        return SeriesResult(
+            SNRDataset.from_arrays(output, self.names, rows), series, epochs
+        )

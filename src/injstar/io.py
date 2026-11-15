@@ -7,6 +7,7 @@ import numpy as np
 from gwmock_pop.loaders.file_loader import write_population_catalogue
 from numpy.typing import NDArray
 
+SNR_FILE = "snr.csv"
 INJECTIONS_FILE = "injections.h5"
 SUMMARY_FILE = "summary.h5"
 CONFIG_FILE = "config.json"

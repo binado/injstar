@@ -54,6 +54,7 @@ The output directory holds:
 
 | File | Contents |
 | --- | --- |
+| `snr.csv` | One row per injection: original row index, per-detector SNRs, horizons and bandwidths, network SNR and detection flag. |
 | `injections.h5` | One row per injection: truth, expected and observed SNR per detector, network SNR, `detected`. |
 | `skymaps/<row_index>.multiorder.fits` | BAYESTAR sky map of each detected event. |
 | `summary.h5` | `injections.h5` plus 50% and 90% areas, searched area and probability, distance quantiles, `log_bci`, `log_bsn`. |

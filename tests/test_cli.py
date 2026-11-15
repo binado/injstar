@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from injstar.cli import app
 from injstar.config import RunConfig, load_run_config
+from injstar.dataset import SNRDataset
 
 runner = CliRunner()
 
@@ -51,12 +52,15 @@ def test_snr_writes_injections_and_no_maps(config_file: Path) -> None:
     assert "2 of 3 injections detected" in output
     out = config_file.parent / "out"
     assert sorted(path.name for path in out.iterdir()) == [
-        "config.json", "injections.h5",
+        "config.json", "injections.h5", "snr.csv",
     ]  # fmt: skip
     columns = read_population_catalogue(out / "injections.h5")
     for name in ("expected_snr_H1", "observed_snr_V1", "horizon_L1", "network_snr"):
         assert columns[name].shape == (3,)
     np.testing.assert_array_equal(columns["detected"], [True, False, True])
+    dataset = SNRDataset.read_csv(out / "snr.csv")
+    np.testing.assert_allclose(dataset.network_snr, columns["network_snr"])
+    np.testing.assert_array_equal(dataset.detected, columns["detected"])
     assert "event_id" not in columns
 
 
