@@ -63,7 +63,7 @@ from injstar import matched_filter
 from injstar.config import RunConfig
 from injstar.detector import projection
 from injstar.detector.network import DetectorRegistry
-from injstar.waveform import Waveform
+from injstar.waveform import WaveformGenerator
 from injstar.waveform import waveform as make_waveform
 
 #: Per-event inputs that do not depend on the waveform models, each an array over
@@ -231,8 +231,8 @@ class Simulator:
         sampling_frequency: float,
         segment_duration: float,
         crop_samples: int,
-        waveform: Waveform,
-        template: Waveform,
+        waveform: WaveformGenerator,
+        template: WaveformGenerator,
         detector_snr: float,
         network_snr: float,
         min_detectors: int,

@@ -7,7 +7,7 @@ translates between the canonical population column names (``distance``,
 assumes which parameters a model needs: whether it is aligned-spin, precessing
 or tidal is read from the model.
 
-:meth:`Waveform.polarizations` evaluates one source and returns the complex
+:meth:`WaveformGenerator.polarizations` evaluates one source and returns the complex
 plus and cross polarizations at the given frequencies. For the dominant mode
 they obey :math:`h_\times = -i \, 2\cos\iota / (1 + \cos^2\iota) \, h_+`;
 face-on this is :math:`h_\times = -i h_+`.
@@ -47,10 +47,10 @@ _CANONICAL_NAMES = {ripple: name for name, ripple in _RIPPLE_NAMES.items()}
 
 
 @dataclass(frozen=True)
-class Waveform:
+class WaveformGenerator:
     """A frequency-domain compact-binary waveform model.
 
-    Build it with :func:`waveform`.
+    Construct directly or build it with :func:`waveform`.
 
     Attributes
     ----------
@@ -68,10 +68,33 @@ class Waveform:
 
     approximant: str
     reference_frequency: float
-    parameter_names: tuple[str, ...]
-    is_precessing: bool
-    highest_mode: int
-    _model: ripplegw.Waveform = field(repr=False, compare=False)
+    _model: ripplegw.Waveform = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        """Build the backend and validate its population parameters."""
+        choices = ripplegw.list_waveforms(domain="FD", source_type="cbc")
+        if self.approximant not in choices:
+            raise ValueError(
+                f"unknown waveform approximant {self.approximant!r}; choose from {choices}"
+            )
+        model = ripplegw.waveform(self.approximant, f_ref=self.reference_frequency)
+        _canonical_names(tuple(model.parameter_names))
+        object.__setattr__(self, "_model", model)
+
+    @property
+    def parameter_names(self) -> tuple[str, ...]:
+        """Canonical population columns the backend model reads."""
+        return _canonical_names(tuple(self._model.parameter_names))
+
+    @property
+    def is_precessing(self) -> bool:
+        """Whether the backend model has precessing spins."""
+        return bool(self._model.waveform_metadata["is_precessing"])
+
+    @property
+    def highest_mode(self) -> int:
+        """Highest multipole ``l`` included by the backend model."""
+        return int(self._model.waveform_metadata["highest_mode"])
 
     def polarizations(
         self, frequencies: jax.Array, source: Mapping[str, ArrayLike]
@@ -98,16 +121,17 @@ class Waveform:
         KeyError
             If ``source`` lacks a parameter the model reads.
         """
-        missing = [name for name in self.parameter_names if name not in source]
+        names = self.parameter_names
+        missing = [name for name in names if name not in source]
         if missing:
             raise KeyError(f"{self.approximant} needs the parameters {missing}")
         params: dict[str, jax.Array] = {}
-        if all(name in self.parameter_names for name in _MASSES):
+        if all(name in names for name in _MASSES):
             chirp_mass, eta = ripplegw.conversions.ms_to_Mc_eta(
                 jnp.stack([jnp.asarray(source[name]) for name in _MASSES])
             )
             params = {"M_c": chirp_mass, "eta": eta}
-        for name in self.parameter_names:
+        for name in names:
             if name in _RIPPLE_NAMES:
                 params[_RIPPLE_NAMES[name]] = jnp.asarray(source[name])
         strain = self._model(frequencies, params)
@@ -133,7 +157,7 @@ def _canonical_names(ripple_names: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(names)
 
 
-def waveform(approximant: str, *, reference_frequency: float) -> Waveform:
+def waveform(approximant: str, *, reference_frequency: float) -> WaveformGenerator:
     """Build a frequency-domain waveform model.
 
     Parameters
@@ -150,18 +174,7 @@ def waveform(approximant: str, *, reference_frequency: float) -> Waveform:
         If the approximant is unknown, or the model reads a parameter with no
         population column.
     """
-    choices = ripplegw.list_waveforms(domain="FD", source_type="cbc")
-    if approximant not in choices:
-        raise ValueError(
-            f"unknown waveform approximant {approximant!r}; choose from {choices}"
-        )
-    model = ripplegw.waveform(approximant, f_ref=reference_frequency)
-    metadata = ripplegw.get_waveform_metadata(approximant)
-    return Waveform(
+    return WaveformGenerator(
         approximant=approximant,
         reference_frequency=reference_frequency,
-        parameter_names=_canonical_names(tuple(model.parameter_names)),
-        is_precessing=bool(metadata["is_precessing"]),
-        highest_mode=int(metadata["highest_mode"]),
-        _model=model,
     )

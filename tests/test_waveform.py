@@ -4,7 +4,7 @@ import pytest
 import ripplegw
 
 from injstar.population import CANONICAL_COLUMNS
-from injstar.waveform import Waveform, waveform
+from injstar.waveform import WaveformGenerator, waveform
 
 MASSES = ("detector_frame_mass_1", "detector_frame_mass_2")
 TAIL = ("distance", "coa_phase", "inclination")
@@ -63,7 +63,7 @@ def test_waveform_reports_the_model_parameters(
 ) -> None:
     model = waveform(approximant, reference_frequency=20.0)
 
-    assert isinstance(model, Waveform)
+    assert isinstance(model, WaveformGenerator)
     assert model.parameter_names == names
     assert model.is_precessing is is_precessing
     assert model.highest_mode == highest_mode
