@@ -1,7 +1,9 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import ripplegw
 
+from injstar.population import CANONICAL_COLUMNS
 from injstar.waveform import Waveform, waveform
 
 MASSES = ("detector_frame_mass_1", "detector_frame_mass_2")
@@ -96,3 +98,12 @@ def test_polarizations_missing_parameter_raises(source: dict[str, float]) -> Non
 
     with pytest.raises(KeyError, match="spin_2z"):
         model.polarizations(jnp.array([30.0]), source)
+
+
+@pytest.mark.parametrize(
+    "approximant", ripplegw.list_waveforms(domain="FD", source_type="cbc")
+)
+def test_waveform_parameters_are_population_columns(approximant: str) -> None:
+    model = waveform(approximant, reference_frequency=20.0)
+
+    assert set(model.parameter_names) <= set(CANONICAL_COLUMNS)

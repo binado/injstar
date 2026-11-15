@@ -53,19 +53,17 @@ from injstar.detector.network import DetectorRegistry
 from injstar.waveform import Waveform
 from injstar.waveform import waveform as make_waveform
 
-#: Per-event inputs of the simulation, each an array over events.
-EVENT_FIELDS = (
+#: Per-event inputs that do not depend on the waveform model, each an array over
+#: events. ``inclination`` and ``distance`` are listed because the projection onto
+#: the detectors is still written by hand rather than taken from the model.
+EXTRINSIC_FIELDS = (
     "event_id",
-    "detector_frame_mass_1",
-    "detector_frame_mass_2",
-    "spin_1z",
-    "spin_2z",
-    "distance",
     "right_ascension",
     "declination",
     "polarization_angle",
-    "inclination",
     "gmst",
+    "inclination",
+    "distance",
 )
 
 #: Per-event outputs shared by :meth:`Simulator.snr` and :meth:`Simulator.series`,
@@ -345,6 +343,13 @@ class Simulator:
             batch_size=config.batch_size,
         )
 
+    @property
+    def event_fields(self) -> tuple[str, ...]:
+        """Per-event inputs: the extrinsic ones and those the waveform reads."""
+        return tuple(
+            dict.fromkeys((*EXTRINSIC_FIELDS, *self._waveform.parameter_names))
+        )
+
     def _event(self, event: Mapping[str, jax.Array]) -> dict[str, jax.Array]:
         """Simulate one event; every output leads with the detector axis."""
         frequencies = jnp.asarray(self.frequencies)
@@ -352,9 +357,10 @@ class Simulator:
         n, df, rate = self.n_samples, self.delta_f, self.sampling_frequency
 
         # The template is the face-on plus polarization at 1 Mpc.
+        source = {name: event[name] for name in self._waveform.parameter_names}
         template, _ = self._waveform.polarizations(
             frequencies,
-            {**event, "distance": 1.0, "inclination": 0.0, "coa_phase": 0.0},
+            source | {"distance": 1.0, "inclination": 0.0, "coa_phase": 0.0},
         )
         sigma = matched_filter.optimal_snr(
             template, inverse_psd=inverse_psd, delta_f=df
@@ -438,7 +444,8 @@ class Simulator:
         self, events: Mapping[str, NDArray]
     ) -> Iterator[tuple[int, dict[str, jax.Array]]]:
         """Fixed-size batches, the last padded by repeating its final event."""
-        missing = [name for name in EVENT_FIELDS if name not in events]
+        fields = self.event_fields
+        missing = [name for name in fields if name not in events]
         if missing:
             raise KeyError(f"events lack the fields {missing}")
         count = len(events["event_id"])
@@ -450,7 +457,7 @@ class Simulator:
                     np.asarray(events[name])[index],
                     dtype=jnp.uint64 if name == "event_id" else jnp.float64,
                 )
-                for name in EVENT_FIELDS
+                for name in fields
             }
             yield min(size, count - start), batch
 
@@ -468,9 +475,10 @@ class Simulator:
         Parameters
         ----------
         events
-            Arrays over events for each name in :data:`EVENT_FIELDS`. Masses
+            Arrays over events for each name in :attr:`event_fields`. Masses
             are detector-frame in solar masses, distance in Mpc, angles in
-            radians; ``event_id`` is a non-negative integer.
+            radians; ``event_id`` is a non-negative integer. Other entries are
+            ignored.
         """
         return SnrResult(**self._run(events, SCALAR_FIELDS))
 
