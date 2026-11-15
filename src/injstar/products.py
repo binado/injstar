@@ -178,11 +178,11 @@ def build_summary(output_dir: Path) -> Path:
     """
     output_dir = Path(output_dir)
     columns, _ = io.read_table(output_dir / io.INJECTIONS_FILE)
-    count = len(columns["event_id"])
+    count = len(columns["detected"])
     statistics = {name: np.full(count, np.nan) for name in statistic_names()}
     paths = np.full(count, "", dtype=object)
-    for row, event_id in enumerate(columns["event_id"]):
-        path = io.skymap_path(output_dir, int(event_id))
+    for row in range(count):
+        path = io.skymap_path(output_dir, row)
         if not path.is_file():
             continue
         values = map_statistics(

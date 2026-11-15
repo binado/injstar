@@ -57,7 +57,7 @@ def test_snr_writes_injections_and_no_maps(config_file: Path) -> None:
     for name in ("expected_snr_H1", "observed_snr_V1", "horizon_L1", "network_snr"):
         assert columns[name].shape == (3,)
     np.testing.assert_array_equal(columns["detected"], [True, False, True])
-    np.testing.assert_array_equal(columns["event_id"], [0, 1, 2])
+    assert "event_id" not in columns
 
 
 def test_snr_records_the_config_it_ran(config_file: Path) -> None:
@@ -75,7 +75,10 @@ def test_snr_ignores_snr_columns_in_the_population(
     invoke("snr", config_file, "--output-dir", tmp_path / "plain")
     lines = population_csv.read_text().splitlines()
     population_csv.write_text(
-        "\n".join([lines[0] + ",snr", *(line + ",999.0" for line in lines[1:])]) + "\n"
+        "\n".join(
+            [lines[0] + ",snr,event_id", *(line + ",999.0,42" for line in lines[1:])]
+        )
+        + "\n"
     )
     code, output = invoke("snr", config_file, "--output-dir", tmp_path / "bogus")
 
@@ -83,6 +86,7 @@ def test_snr_ignores_snr_columns_in_the_population(
     plain, _ = io.read_table(tmp_path / "plain" / "injections.h5")
     bogus, _ = io.read_table(tmp_path / "bogus" / "injections.h5")
     np.testing.assert_array_equal(bogus["snr"], [999.0] * 3)
+    np.testing.assert_array_equal(bogus["event_id"], [42] * 3)
     for name, values in plain.items():
         np.testing.assert_array_equal(bogus[name], values)
 
@@ -150,7 +154,7 @@ def test_run_resume_and_summarise(config_file: Path, population_csv: Path) -> No
     maps = sorted(path.name for path in (out / "skymaps").iterdir())
     assert maps == ["0.multiorder.fits", "2.multiorder.fits"]
     first, _ = io.read_table(out / "summary.h5")
-    np.testing.assert_array_equal(first["event_id"], [0, 1, 2])
+    assert "event_id" not in first
     np.testing.assert_array_equal(first["label"], ["b", "a", "c"])
     np.testing.assert_array_equal(first["localized"], [True, False, True])
     assert np.isnan(first["area_90"][1])
@@ -180,7 +184,7 @@ def test_run_resume_and_summarise(config_file: Path, population_csv: Path) -> No
 
 
 @pytest.mark.parametrize(
-    "name", ["event_id", "network_snr", "expected_snr_H1", "area_90", "skymap"]
+    "name", ["network_snr", "expected_snr_H1", "area_90", "skymap"]
 )
 def test_generated_column_collision_rejected(
     config_file: Path, population_csv: Path, name: str

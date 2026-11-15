@@ -111,14 +111,14 @@ def read_table(path: Path) -> tuple[Columns, dict[str, str]]:
     return columns, attrs
 
 
-def skymap_path(output_dir: Path, event_id: int) -> Path:
-    """Where the sky map of ``event_id`` lives in a run directory.
+def skymap_path(output_dir: Path, row_index: int) -> Path:
+    """Where the sky map of ``row_index`` lives in a run directory.
 
     Parameters
     ----------
     output_dir
         Run directory.
-    event_id
+    row_index
         Zero-based input row index.
     """
-    return Path(output_dir) / "skymaps" / f"{int(event_id)}.multiorder.fits"
+    return Path(output_dir) / "skymaps" / f"{int(row_index)}.multiorder.fits"

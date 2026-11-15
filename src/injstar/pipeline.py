@@ -193,13 +193,13 @@ def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
     return target
 
 
-def _pending(output_dir: Path, event_ids: np.ndarray) -> np.ndarray:
+def _pending(output_dir: Path, rows: np.ndarray) -> np.ndarray:
     """Indices of the events that have no sky map yet."""
     return np.array(
         [
             index
-            for index, event_id in enumerate(event_ids)
-            if not io.skymap_path(output_dir, int(event_id)).is_file()
+            for index, row in enumerate(rows)
+            if not io.skymap_path(output_dir, int(row)).is_file()
         ],
         dtype=int,
     )
@@ -245,7 +245,7 @@ def run(config: RunConfig, *, overwrite: bool = False, resume: bool = False) -> 
     inputs = load_inputs(config)
     columns, _ = io.read_table(output_dir / io.INJECTIONS_FILE)
     detected = np.flatnonzero(columns["detected"])
-    todo = detected[_pending(output_dir, columns["event_id"][detected])]
+    todo = detected[_pending(output_dir, detected)]
     logger.info(
         "%d detected, %d already localized, %d to do",
         len(detected),
@@ -277,11 +277,11 @@ def run(config: RunConfig, *, overwrite: bool = False, resume: bool = False) -> 
             for start in range(0, len(todo), config.batch_size):
                 rows = todo[start : start + config.batch_size]
                 drawn = simulator.series(
-                    {name: values[rows] for name, values in events.items()}
+                    {name: values[rows] for name, values in events.items()}, rows=rows
                 )
                 batch = [
                     Event(
-                        event_id=int(columns["event_id"][row]),
+                        row_index=int(row),
                         coa_time=float(columns["coa_time"][row]),
                         series=drawn.series[index],
                         epochs=drawn.epochs[index],

@@ -2,7 +2,7 @@
 
 Detector-frame masses, distance, sky position, inclination, polarization and
 coalescence time are required. Optional spins, tides and phase default to zero.
-Event IDs are zero-based input row indices; extra columns retain their names.
+Extra columns retain their names.
 """
 
 from pathlib import Path
@@ -13,7 +13,6 @@ from numpy.typing import NDArray
 
 #: Columns the pipeline uses, in output order.
 CANONICAL_COLUMNS = (
-    "event_id",
     "detector_frame_mass_1",
     "detector_frame_mass_2",
     "spin_1x",
@@ -50,7 +49,7 @@ Population = dict[str, NDArray]
 
 
 def read_population(path: Path) -> Population:
-    """Read a catalogue in row order, adding defaults and row-index event IDs.
+    """Read a catalogue in row order, adding defaults.
 
     Parameters
     ----------
@@ -63,17 +62,15 @@ def read_population(path: Path) -> Population:
         Simulation columns followed by the remaining input columns.
     """
     columns = read_population_catalogue(path)
-    if "event_id" in columns:
-        raise ValueError("population must not contain an event_id column")
     count = len(next(iter(columns.values())))
     for name in _ZERO_DEFAULTS:
         columns.setdefault(name, np.zeros(count))
-    missing = [name for name in CANONICAL_COLUMNS[1:] if name not in columns]
+    missing = [name for name in CANONICAL_COLUMNS if name not in columns]
     if missing:
         raise ValueError(f"population lacks the columns {missing}")
 
-    out: Population = {"event_id": np.arange(count, dtype=np.uint64)}
-    for name in CANONICAL_COLUMNS[1:]:
+    out: Population = {}
+    for name in CANONICAL_COLUMNS:
         values = np.asarray(columns[name], dtype=float)
         if not np.all(np.isfinite(values)):
             raise ValueError(f"population column {name!r} has non-finite values")

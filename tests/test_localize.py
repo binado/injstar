@@ -14,7 +14,7 @@ def test_localize_event_rejects_a_short_series(
 ) -> None:
     event, network = event_and_network
     short = Event(
-        event.event_id,
+        event.row_index,
         event.coa_time,
         event.series[:, 180:225],
         event.epochs + 180 / network.sampling_frequency,

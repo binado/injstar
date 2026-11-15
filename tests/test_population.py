@@ -11,8 +11,6 @@ def test_csv_gives_canonical_columns(population_csv: Path) -> None:
     population = read_population(population_csv)
 
     assert tuple(population) == CANONICAL_COLUMNS
-    np.testing.assert_array_equal(population["event_id"], [0, 1, 2])
-    assert population["event_id"].dtype == np.uint64
     assert population["distance"][0] == 1500.0
 
 
@@ -20,7 +18,7 @@ def test_hdf5_structured_dataset_matches_csv(
     population_csv: Path, tmp_path: Path
 ) -> None:
     expected = read_population(population_csv)
-    names = CANONICAL_COLUMNS[1:]
+    names = CANONICAL_COLUMNS
     table = np.zeros(3, dtype=[(name, "f8") for name in names])
     for name in names:
         table[name] = expected[name]
@@ -63,8 +61,7 @@ def test_hdf5_group_matches_csv(population_csv: Path, tmp_path: Path) -> None:
     with h5py.File(path, "w") as file:
         group = file.create_group("data")
         for name, values in expected.items():
-            if name != "event_id":
-                group.create_dataset(name, data=values)
+            group.create_dataset(name, data=values)
     actual = read_population(path)
     for name in expected:
         np.testing.assert_array_equal(actual[name], expected[name])
@@ -87,13 +84,14 @@ def test_canonical_columns_required(
         read_population(path)
 
 
-def test_event_id_rejected(population_csv: Path) -> None:
+def test_event_id_is_preserved(population_csv: Path) -> None:
     lines = population_csv.read_text().splitlines()
     population_csv.write_text(
         "\n".join([lines[0] + ",event_id", *(line + ",1" for line in lines[1:])]) + "\n"
     )
-    with pytest.raises(ValueError, match="event_id"):
-        read_population(population_csv)
+    np.testing.assert_array_equal(
+        read_population(population_csv)["event_id"], [1, 1, 1]
+    )
 
 
 @pytest.mark.parametrize(
@@ -132,5 +130,5 @@ def test_simulation_events_pass_columns_through(population_csv: Path) -> None:
 
     assert "coa_time" not in events
     np.testing.assert_array_equal(events["gmst"], gmst)
-    for name in ("detector_frame_mass_1", "distance", "inclination", "event_id"):
+    for name in ("detector_frame_mass_1", "distance", "inclination"):
         np.testing.assert_array_equal(events[name], population[name])
