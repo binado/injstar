@@ -1,15 +1,16 @@
 from pathlib import Path
 
-import lal
-import lalsimulation
 import numpy as np
 import pytest
+from pycbc import filter as pycbc_filter
+from pycbc.types import FrequencySeries
 
 from injstar.detector.network import DetectorRegistry
 from injstar.population import read_population, simulation_events
 from injstar.simulate import Simulator, greenwich_sidereal_time
+from injstar.waveform.pycbc import PyCBCWaveformGenerator
 
-from .conftest import make_config
+from .conftest import PycbcDetector, make_config
 
 
 @pytest.fixture
@@ -46,60 +47,101 @@ def repeat(
     return out
 
 
-def test_zero_noise_peak_is_the_expected_snr(
-    tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
+@pytest.mark.parametrize("template_approximant", ["IMRPhenomD", "IMRPhenomXAS"])
+def test_noise_free_series_matches_pycbc(
+    tmp_path: Path,
+    registry: DetectorRegistry,
+    events: dict[str, np.ndarray],
+    pycbc_waveform: type[PyCBCWaveformGenerator],
+    pycbc_detector: type[PycbcDetector],
+    template_approximant: str,
 ) -> None:
-    simulator = Simulator.from_config(make_config(tmp_path, noise=False), registry)
-
-    result = simulator.series(events)
-
-    scalars = result.scalars
-    # The peak falls between samples, so the sampled maximum is just below it;
-    # by Cauchy-Schwarz it is never above the optimal SNR, whatever the template.
-    assert np.all(scalars.observed_snr <= scalars.expected_snr * (1 + 1e-9))
-    np.testing.assert_allclose(scalars.observed_snr, scalars.expected_snr, rtol=0.02)
-    centre = result.series.shape[-1] // 2
-    np.testing.assert_allclose(
-        np.abs(result.series[..., centre]), scalars.observed_snr, rtol=1e-12
+    config = make_config(
+        tmp_path,
+        noise=False,
+        waveform_approximant="IMRPhenomD",
+        template_approximant=template_approximant,
+        segment_duration=2.0,
+        sampling_frequency=1024.0,
+        minimum_frequency=20.0,
+        maximum_frequency=400.0,
+        crop_duration=0.1,
     )
-    assert result.series.shape == (3, 3, simulator.crop_samples)
+    event = {field: values[:1] for field, values in events.items()}
+    event["coa_phase"] = np.array([0.6])
+    result = Simulator.from_config(config, registry).series(event)
 
+    source = {field: float(values[0]) for field, values in event.items()}
+    bins = slice(40, 801)
+    frequencies = np.arange(bins.start, bins.stop) * 0.5
+    midpoint = config.segment_samples // 2
+    half_crop = config.crop_samples // 2
+    rate = config.sampling_frequency
 
-def test_centre_sample_tracks_the_arrival_time(
-    tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
-) -> None:
-    config = make_config(tmp_path, noise=False)
-    result = Simulator.from_config(config, registry).series(events)
+    def frequency_series(values: np.ndarray, fill: float = 0.0) -> FrequencySeries:
+        full = np.full(midpoint + 1, fill, dtype=values.dtype)
+        full[bins] = values
+        return FrequencySeries(full, delta_f=0.5)
 
-    centre_time = result.epochs + (config.crop_samples // 2) / config.sampling_frequency
-    for index, name in enumerate(("H1", "L1", "V1")):
-        location = registry.detectors[name].geometry.location
-        delay = lal.TimeDelayFromEarthCenter(
-            location, 1.2, -0.4, lal.LIGOTimeGPS(1400000000)
-        )
-        assert (
-            abs(centre_time[0, index] - delay) <= 0.5 / config.sampling_frequency + 1e-9
-        )
-
-
-def test_horizon_matches_lal_amplitude(
-    tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
-) -> None:
-    simulator = Simulator.from_config(make_config(tmp_path, noise=False), registry)
-    horizon = simulator.snr(events).horizon[0, 0]
-
-    plus, _ = lalsimulation.SimInspiralChooseFDWaveform(
-        36.0 * lal.MSUN_SI, 29.0 * lal.MSUN_SI, 0, 0, 0, 0, 0, 0,
-        1e6 * lal.PC_SI, 0, 0, 0, 0, 0,
-        simulator.delta_f, 20.0, 1024.0, 20.0, None, lalsimulation.IMRPhenomD,
-    )  # fmt: skip
-    bins = np.round(simulator.frequencies / simulator.delta_f).astype(int)
-    psd = registry.detectors["H1"].sensitivity(simulator.frequencies)
-    expected = np.sqrt(
-        4 * simulator.delta_f * np.sum(np.abs(plus.data.data[bins]) ** 2 / psd)
+    plus, cross = pycbc_waveform(config.waveform_approximant, 20.0)(frequencies, source)
+    template, _ = pycbc_waveform(template_approximant, 20.0)(
+        frequencies, source | {"distance": 1.0, "inclination": 0.0, "coa_phase": 0.0}
     )
+    h = frequency_series(template)
+    sky = {
+        "right_ascension": source["right_ascension"],
+        "declination": source["declination"],
+    }
+    # With PyCBC 2.11.0, the mixed-model crop differed by up to 2.6e-4
+    # of peak SNR, mostly from phase differences in the compiled Ripple
+    # injection. The 1e-3 tolerance covers that difference. With a matched
+    # template, those phase differences mostly cancel and the crop agreed
+    # within 4e-7 of peak SNR.
+    series_tolerance = (
+        1e-6 if config.waveform_approximant == template_approximant else 1e-3
+    )
+    assert result.series.shape == (1, len(config.network), config.crop_samples)
+    for index, name in enumerate(config.network):
+        registered = registry.detectors[name]
+        detector = pycbc_detector(name, geometry=registered.geometry)
+        fp, fc = detector.antenna_pattern(
+            source["gmst"], polarization_angle=source["polarization_angle"], **sky
+        )
+        delay = float(detector.time_delay_from_geocenter(source["gmst"], **sky))
+        strain = (fp * plus + fc * cross) * np.exp(
+            -2j * np.pi * frequencies * (midpoint / rate + delay)
+        )
+        d = frequency_series(strain)
+        kwargs = {
+            "psd": frequency_series(registered.sensitivity(frequencies), fill=np.inf),
+            "low_frequency_cutoff": 20.0,
+            "high_frequency_cutoff": 400.5,
+        }
+        reference = pycbc_filter.matched_filter(h, d, **kwargs).numpy()
+        start = midpoint + round(delay * rate) - half_crop
+        crop = reference[start : start + config.crop_samples]
+        peak = np.max(np.abs(crop))
 
-    assert horizon == pytest.approx(expected, rel=1e-6)
+        assert result.epochs[0, index] == (start - midpoint) / rate
+        np.testing.assert_allclose(
+            result.series[0, index] / peak,
+            crop / peak,
+            rtol=series_tolerance,
+            atol=series_tolerance,
+        )
+        np.testing.assert_allclose(
+            result.scalars.observed_snr[0, index], peak, rtol=series_tolerance
+        )
+        # The optimal SNR and horizon use waveform norms. Both agreed to
+        # about 2e-7 relative across the two model pairs.
+        np.testing.assert_allclose(
+            [
+                result.scalars.expected_snr[0, index],
+                result.scalars.horizon[0, index],
+            ],
+            [pycbc_filter.sigma(d, **kwargs), pycbc_filter.sigma(h, **kwargs)],
+            rtol=1e-6,
+        )
 
 
 def test_noise_has_unit_variance_per_quadrature(
@@ -232,25 +274,6 @@ def test_higher_mode_signal_never_exceeds_its_optimal_snr(
     assert np.all(result.observed_snr <= result.expected_snr * (1 + 1e-9))
     # The dominant-mode template recovers most of a higher-mode signal.
     np.testing.assert_allclose(result.observed_snr, result.expected_snr, rtol=0.05)
-
-
-def test_horizon_comes_from_the_template_not_the_signal(
-    tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
-) -> None:
-    template_only = make_config(
-        tmp_path, noise=False, waveform_approximant="IMRPhenomXAS"
-    )
-    higher_modes = make_config(
-        tmp_path,
-        noise=False,
-        waveform_approximant="IMRPhenomXPHM",
-        template_approximant="IMRPhenomXAS",
-    )
-
-    expected = Simulator.from_config(template_only, registry).snr(events).horizon
-    horizon = Simulator.from_config(higher_modes, registry).snr(events).horizon
-
-    np.testing.assert_allclose(horizon, expected)
 
 
 def test_from_config_rejects_a_higher_mode_template(
