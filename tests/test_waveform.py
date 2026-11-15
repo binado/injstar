@@ -4,7 +4,7 @@ import pytest
 import ripplegw
 
 from injstar.population import CANONICAL_COLUMNS
-from injstar.waveform import Waveform, waveform
+from injstar.waveform import WaveformGenerator, waveform
 
 MASSES = ("detector_frame_mass_1", "detector_frame_mass_2")
 TAIL = ("distance", "coa_phase", "inclination")
@@ -63,7 +63,7 @@ def test_waveform_reports_the_model_parameters(
 ) -> None:
     model = waveform(approximant, reference_frequency=20.0)
 
-    assert isinstance(model, Waveform)
+    assert isinstance(model, WaveformGenerator)
     assert model.parameter_names == names
     assert model.is_precessing is is_precessing
     assert model.highest_mode == highest_mode
@@ -75,7 +75,7 @@ def test_polarizations_face_on_cross_is_minus_i_plus(
     model = waveform("IMRPhenomD", reference_frequency=20.0)
     frequencies = jnp.linspace(20.0, 512.0, 50)
 
-    plus, cross = model.polarizations(frequencies, source)
+    plus, cross = model(frequencies, source)
 
     np.testing.assert_allclose(cross, -1j * plus, rtol=1e-12, atol=0)
     assert np.all(np.abs(plus) > 0)
@@ -87,7 +87,7 @@ def test_polarizations_zero_samples_outside_the_model_band(
     model = waveform("IMRPhenomD", reference_frequency=20.0)
     frequencies = jnp.array([20.0, 1e6])
 
-    plus, cross = model.polarizations(frequencies, source)
+    plus, cross = model(frequencies, source)
 
     assert np.all(np.isfinite(plus)) and np.all(np.isfinite(cross))
 
@@ -97,7 +97,7 @@ def test_polarizations_missing_parameter_raises(source: dict[str, float]) -> Non
     del source["spin_2z"]
 
     with pytest.raises(KeyError, match="spin_2z"):
-        model.polarizations(jnp.array([30.0]), source)
+        model(jnp.array([30.0]), source)
 
 
 @pytest.mark.parametrize(

@@ -63,7 +63,7 @@ from injstar import matched_filter
 from injstar.config import RunConfig
 from injstar.detector import projection
 from injstar.detector.network import DetectorRegistry
-from injstar.waveform import Waveform
+from injstar.waveform import WaveformGenerator
 from injstar.waveform import waveform as make_waveform
 
 #: Per-event inputs that do not depend on the waveform models, each an array over
@@ -231,8 +231,8 @@ class Simulator:
         sampling_frequency: float,
         segment_duration: float,
         crop_samples: int,
-        waveform: Waveform,
-        template: Waveform,
+        waveform: WaveformGenerator,
+        template: WaveformGenerator,
         detector_snr: float,
         network_snr: float,
         min_detectors: int,
@@ -376,7 +376,7 @@ class Simulator:
         n, df, rate = self.n_samples, self.delta_f, self.sampling_frequency
 
         # The template: the face-on plus polarization at 1 Mpc.
-        template, _ = self._template.polarizations(
+        template, _ = self._template(
             frequencies,
             {name: event[name] for name in self._template.parameter_names} | _FACE_ON,
         )
@@ -410,7 +410,7 @@ class Simulator:
 
         # The signal: the full projected strain, with the geocentric time on
         # sample n // 2 of the periodic segment.
-        plus, cross = self._waveform.polarizations(
+        plus, cross = self._waveform(
             frequencies,
             {name: event[name] for name in self._waveform.parameter_names},
         )
