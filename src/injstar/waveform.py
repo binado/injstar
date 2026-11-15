@@ -7,7 +7,7 @@ translates between the canonical population column names (``distance``,
 assumes which parameters a model needs: whether it is aligned-spin, precessing
 or tidal is read from the model.
 
-:meth:`WaveformGenerator.polarizations` evaluates one source and returns the complex
+:meth:`WaveformGenerator.__call__` evaluates one source and returns the complex
 plus and cross polarizations at the given frequencies. For the dominant mode
 they obey :math:`h_\times = -i \, 2\cos\iota / (1 + \cos^2\iota) \, h_+`;
 face-on this is :math:`h_\times = -i h_+`.
@@ -96,7 +96,7 @@ class WaveformGenerator:
         """Highest multipole ``l`` included by the backend model."""
         return int(self._model.waveform_metadata["highest_mode"])
 
-    def polarizations(
+    def __call__(
         self, frequencies: jax.Array, source: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, jax.Array]:
         """Plus and cross polarizations of one source.

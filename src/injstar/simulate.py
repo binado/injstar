@@ -376,7 +376,7 @@ class Simulator:
         n, df, rate = self.n_samples, self.delta_f, self.sampling_frequency
 
         # The template: the face-on plus polarization at 1 Mpc.
-        template, _ = self._template.polarizations(
+        template, _ = self._template(
             frequencies,
             {name: event[name] for name in self._template.parameter_names} | _FACE_ON,
         )
@@ -410,7 +410,7 @@ class Simulator:
 
         # The signal: the full projected strain, with the geocentric time on
         # sample n // 2 of the periodic segment.
-        plus, cross = self._waveform.polarizations(
+        plus, cross = self._waveform(
             frequencies,
             {name: event[name] for name in self._waveform.parameter_names},
         )
