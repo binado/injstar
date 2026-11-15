@@ -59,6 +59,10 @@ The output directory holds:
 | `summary.h5` | `injections.h5` plus 50% and 90% areas, searched area and probability, distance quantiles, `log_bci`, `log_bsn`. |
 | `config.json` | The run config as validated, with paths made absolute. |
 
+The HDF5 tables use gwmock-pop’s structured `data` dataset. Text columns are
+stored as UTF-8 bytes. Run directories created with the previous table layout
+must be regenerated before resuming or summarising.
+
 ### Population columns
 
 `detector_frame_mass_1`, `detector_frame_mass_2` (solar masses), `distance`

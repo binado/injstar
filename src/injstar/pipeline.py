@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from gwmock_pop.loaders.file_loader import read_population_catalogue
 
 from injstar import io, products
 from injstar.config import RunConfig
@@ -243,7 +244,7 @@ def run(config: RunConfig, *, overwrite: bool = False, resume: bool = False) -> 
         )
 
     inputs = load_inputs(config)
-    columns, _ = io.read_table(output_dir / io.INJECTIONS_FILE)
+    columns = read_population_catalogue(output_dir / io.INJECTIONS_FILE)
     detected = np.flatnonzero(columns["detected"])
     todo = detected[_pending(output_dir, detected)]
     logger.info(

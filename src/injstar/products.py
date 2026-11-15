@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
+from gwmock_pop.loaders.file_loader import read_population_catalogue
 from numpy.typing import NDArray
 
 from injstar import io
@@ -177,7 +178,7 @@ def build_summary(output_dir: Path) -> Path:
         The written ``summary.h5``.
     """
     output_dir = Path(output_dir)
-    columns, _ = io.read_table(output_dir / io.INJECTIONS_FILE)
+    columns = read_population_catalogue(output_dir / io.INJECTIONS_FILE)
     count = len(columns["detected"])
     statistics = {name: np.full(count, np.nan) for name in statistic_names()}
     paths = np.full(count, "", dtype=object)
