@@ -42,6 +42,10 @@ Issues = "https://github.com/binado/injstar/issues"
 "injstar" = "injstar.__main__:main"
 
 [project.optional-dependencies]
+pycbc = [
+    "lalsuite",
+    "pycbc>=2.11.0",
+]
 validation = [
     "gwmock-signal>=0.24.0 ; python_full_version >= '3.13'",
     "pycbc>=2.11.0",
