@@ -90,10 +90,13 @@ def test_bad_populations_are_rejected(
         read_population(path)
 
 
-def test_simulation_events_mass_parameters(population_csv: Path) -> None:
+def test_simulation_events_pass_columns_through(population_csv: Path) -> None:
     population = read_population(population_csv)
+    gmst = np.array([0.1, 0.2, 0.3])
 
-    events = simulation_events(population, np.zeros(3))
+    events = simulation_events(population, gmst)
 
-    assert events["chirp_mass"][0] == pytest.approx(28.0956, rel=1e-4)
-    assert events["symmetric_mass_ratio"][0] == pytest.approx(36 * 29 / 65**2)
+    assert "coa_time" not in events
+    np.testing.assert_array_equal(events["gmst"], gmst)
+    for name in ("detector_frame_mass_1", "distance", "inclination", "event_id"):
+        np.testing.assert_array_equal(events[name], population[name])

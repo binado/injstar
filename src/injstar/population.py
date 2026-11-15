@@ -182,19 +182,8 @@ def simulation_events(population: Population, gmst: NDArray) -> Population:
     gmst
         Greenwich mean sidereal time in radians at each ``coa_time``.
     """
-    mass_1 = population["detector_frame_mass_1"]
-    mass_2 = population["detector_frame_mass_2"]
-    total = mass_1 + mass_2
-    return {
-        "event_id": population["event_id"],
-        "chirp_mass": (mass_1 * mass_2) ** 0.6 / total**0.2,
-        "symmetric_mass_ratio": mass_1 * mass_2 / total**2,
-        "spin_1z": population["spin_1z"],
-        "spin_2z": population["spin_2z"],
-        "luminosity_distance": population["distance"],
-        "right_ascension": population["right_ascension"],
-        "declination": population["declination"],
-        "polarization_angle": population["polarization_angle"],
-        "inclination": population["inclination"],
-        "gmst": np.asarray(gmst, dtype=float),
+    events = {
+        name: population[name] for name in CANONICAL_COLUMNS if name != "coa_time"
     }
+    events["gmst"] = np.asarray(gmst, dtype=float)
+    return events

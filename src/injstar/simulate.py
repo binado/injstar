@@ -44,22 +44,23 @@ import jax
 import jax.numpy as jnp
 import lal
 import numpy as np
-import ripplegw
 from numpy.typing import NDArray
 
 from injstar import matched_filter
 from injstar.config import RunConfig
 from injstar.detector import projection
 from injstar.detector.network import DetectorRegistry
+from injstar.waveform import Waveform
+from injstar.waveform import waveform as make_waveform
 
 #: Per-event inputs of the simulation, each an array over events.
 EVENT_FIELDS = (
     "event_id",
-    "chirp_mass",
-    "symmetric_mass_ratio",
+    "detector_frame_mass_1",
+    "detector_frame_mass_2",
     "spin_1z",
     "spin_2z",
-    "luminosity_distance",
+    "distance",
     "right_ascension",
     "declination",
     "polarization_angle",
@@ -206,7 +207,7 @@ class Simulator:
     crop_samples
         Odd number of samples in the cropped SNR series.
     waveform
-        Waveform model providing the template amplitude.
+        Waveform model; its face-on plus polarization is the template.
     detector_snr, network_snr, min_detectors
         Detection rule: at least ``min_detectors`` detectors reach
         ``detector_snr`` and the network SNR reaches ``network_snr``.
@@ -230,7 +231,7 @@ class Simulator:
         sampling_frequency: float,
         segment_duration: float,
         crop_samples: int,
-        waveform: ripplegw.AmplitudePhaseWaveform,
+        waveform: Waveform,
         detector_snr: float,
         network_snr: float,
         min_detectors: int,
@@ -297,8 +298,9 @@ class Simulator:
         Raises
         ------
         ValueError
-            If the band holds fewer than three bins, the waveform model does not
-            expose an amplitude, or a detector's PSD does not cover the band.
+            If the band holds fewer than three bins, the waveform model is
+            precessing or has modes above the dominant one, or a detector's PSD
+            does not cover the band.
         """
         names, responses, locations = registry.arrays(config.network)
 
@@ -315,13 +317,14 @@ class Simulator:
             [registry.detectors[name].sensitivity(frequencies) for name in names]
         )
 
-        waveform = ripplegw.waveform(
+        waveform = make_waveform(
             config.waveform_approximant,
-            f_ref=config.reference_frequency,
+            reference_frequency=config.reference_frequency,
         )
-        if not isinstance(waveform, ripplegw.AmplitudePhaseWaveform):
+        if waveform.is_precessing or waveform.highest_mode > 2:
             raise ValueError(
-                f"waveform {config.waveform_approximant!r} does not expose an amplitude"
+                f"waveform {config.waveform_approximant!r} is precessing or has "
+                "higher modes; only dominant-mode aligned-spin models are supported"
             )
         return cls(
             names=names,
@@ -348,25 +351,17 @@ class Simulator:
         inverse_psd = jnp.asarray(self._inverse_psd)
         n, df, rate = self.n_samples, self.delta_f, self.sampling_frequency
 
-        amplitude = self._waveform.amplitude(
+        # The template is the face-on plus polarization at 1 Mpc.
+        template, _ = self._waveform.polarizations(
             frequencies,
-            {
-                "M_c": event["chirp_mass"],
-                "eta": event["symmetric_mass_ratio"],
-                "s1_z": event["spin_1z"],
-                "s2_z": event["spin_2z"],
-                "d_L": 1.0,
-                "phase_c": 0.0,
-                "iota": 0.0,
-            },
+            {**event, "distance": 1.0, "inclination": 0.0, "coa_phase": 0.0},
         )
-        amplitude = jnp.nan_to_num(amplitude, nan=0.0, posinf=0.0, neginf=0.0)
         sigma = matched_filter.optimal_snr(
-            amplitude, inverse_psd=inverse_psd, delta_f=df
+            template, inverse_psd=inverse_psd, delta_f=df
         )
         bandwidth = jnp.sqrt(
             matched_filter.second_frequency_cumulant(
-                amplitude, frequencies=frequencies, inverse_psd=inverse_psd
+                template, frequencies=frequencies, inverse_psd=inverse_psd
             )
         )
 
@@ -389,13 +384,13 @@ class Simulator:
         )(jnp.asarray(self._locations))
 
         cos_inclination = jnp.cos(event["inclination"])
-        rho = (sigma / event["luminosity_distance"]) * (
+        rho = (sigma / event["distance"]) * (
             0.5 * (1 + cos_inclination**2) * plus - 1j * cos_inclination * cross
         )
 
         # The geocentric time sits on sample n // 2 of the periodic segment.
         peak_time = (n // 2) / rate + delay
-        unit_template = amplitude / jnp.where(sigma > 0, sigma, 1.0)[:, None]
+        unit_template = template / jnp.where(sigma > 0, sigma, 1.0)[:, None]
         data = _signal_spectrum(
             unit_template, rho=rho, peak_time=peak_time, frequencies=frequencies
         )
