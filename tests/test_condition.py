@@ -18,6 +18,8 @@ from numpy.typing import NDArray
 from injstar.detector.network import DetectorRegistry
 from injstar.localize import Event, Network
 
+from .tolerances import assert_close
+
 PSD_DELTA_F = 0.25
 PSD_F_MAX = 2048.0
 
@@ -106,14 +108,10 @@ def test_geodetic_responses_match_lal_tensors_to_1e_3(
     reference: Reference, event_and_network: tuple[Event, Network]
 ) -> None:
     # The audit records up to 3e-4 for H1 and L1 and 2e-3 for K1 (not in HLV).
-    np.testing.assert_allclose(
-        event_and_network[1].responses, reference.responses, atol=1e-3
-    )
+    assert_close(event_and_network[1].responses, reference.responses)
 
 
 def test_horizons_match_lal_template_within_half_a_percent(
     reference: Reference, event_and_network: tuple[Event, Network]
 ) -> None:
-    np.testing.assert_allclose(
-        event_and_network[0].horizon, reference.horizons, rtol=5e-3
-    )
+    assert_close(event_and_network[0].horizon, reference.horizons)

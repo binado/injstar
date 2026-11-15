@@ -4,6 +4,8 @@ import pytest
 
 from injstar.detector import projection
 
+from ..tolerances import assert_close
+
 
 @pytest.mark.parametrize("name", ["H1", "L1", "V1"])
 def test_antenna_pattern_and_delay_match_lal(name: str) -> None:
@@ -36,6 +38,6 @@ def test_antenna_pattern_and_delay_match_lal(name: str) -> None:
         lal.TimeDelayFromEarthCenter(detector.location, a, d, time)
         for a, d in zip(ra, dec, strict=True)
     ]
-    np.testing.assert_allclose(plus, expected[:, 0], atol=1e-7)
-    np.testing.assert_allclose(cross, expected[:, 1], atol=1e-7)
-    np.testing.assert_allclose(delay, expected_delay, atol=1e-9)
+    assert_close(plus, expected[:, 0])
+    assert_close(cross, expected[:, 1])
+    assert_close(delay, expected_delay)

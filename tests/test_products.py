@@ -4,6 +4,8 @@ from ligo.skymap import distance
 
 from injstar.products import DISTANCE_QUANTILES, _distance_statistics, statistic_names
 
+from .tolerances import assert_close
+
 
 @pytest.fixture
 def layer() -> dict[str, np.ndarray]:
@@ -68,7 +70,7 @@ def test_distance_statistics_with_failures_equal_those_of_the_valid_pixels(
 
     _, quantiles = _statistics(_with_failed(layer))
 
-    np.testing.assert_allclose(quantiles, expected)
+    assert_close(quantiles, expected)
 
 
 def test_distance_statistics_ignore_the_values_in_failed_pixels(
@@ -77,7 +79,7 @@ def test_distance_statistics_ignore_the_values_in_failed_pixels(
     clean = _with_failed(layer)
     garbled = clean | {"mu": np.append(clean["mu"][:-1], np.nan)}
 
-    np.testing.assert_allclose(_statistics(garbled)[1], _statistics(clean)[1])
+    assert_close(_statistics(garbled)[1], _statistics(clean)[1])
 
 
 def test_distance_statistics_with_every_pixel_failed_are_nan() -> None:
