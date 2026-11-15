@@ -6,6 +6,8 @@ import ripplegw
 from injstar.population import CANONICAL_COLUMNS
 from injstar.waveform import RippleWaveformGenerator, waveform
 
+from .tolerances import assert_close
+
 MASSES = ("detector_frame_mass_1", "detector_frame_mass_2")
 TAIL = ("distance", "coa_phase", "inclination")
 
@@ -77,7 +79,7 @@ def test_polarizations_face_on_cross_is_minus_i_plus(
 
     plus, cross = model(frequencies, source)
 
-    np.testing.assert_allclose(cross, -1j * plus, rtol=1e-12, atol=0)
+    assert_close(cross, -1j * plus)
     assert np.all(np.abs(plus) > 0)
 
 

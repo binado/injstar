@@ -11,6 +11,7 @@ from injstar.simulate import Simulator, greenwich_sidereal_time
 from injstar.waveform.pycbc import PyCBCWaveformGenerator
 
 from .conftest import PycbcDetector, make_config
+from .tolerances import assert_close
 
 
 @pytest.fixture
@@ -47,20 +48,20 @@ def repeat(
     return out
 
 
-@pytest.mark.parametrize("template_approximant", ["IMRPhenomD", "IMRPhenomXAS"])
+@pytest.mark.parametrize("approximant", ["IMRPhenomD", "IMRPhenomXAS"])
 def test_noise_free_series_matches_pycbc(
     tmp_path: Path,
     registry: DetectorRegistry,
     events: dict[str, np.ndarray],
     pycbc_waveform: type[PyCBCWaveformGenerator],
     pycbc_detector: type[PycbcDetector],
-    template_approximant: str,
+    approximant: str,
 ) -> None:
     config = make_config(
         tmp_path,
         noise=False,
-        waveform_approximant="IMRPhenomD",
-        template_approximant=template_approximant,
+        waveform_approximant=approximant,
+        template_approximant=approximant,
         segment_duration=2.0,
         sampling_frequency=1024.0,
         minimum_frequency=20.0,
@@ -83,8 +84,8 @@ def test_noise_free_series_matches_pycbc(
         full[bins] = values
         return FrequencySeries(full, delta_f=0.5)
 
-    plus, cross = pycbc_waveform(config.waveform_approximant, 20.0)(frequencies, source)
-    template, _ = pycbc_waveform(template_approximant, 20.0)(
+    plus, cross = pycbc_waveform(approximant, 20.0)(frequencies, source)
+    template, _ = pycbc_waveform(approximant, 20.0)(
         frequencies, source | {"distance": 1.0, "inclination": 0.0, "coa_phase": 0.0}
     )
     h = frequency_series(template)
@@ -92,14 +93,6 @@ def test_noise_free_series_matches_pycbc(
         "right_ascension": source["right_ascension"],
         "declination": source["declination"],
     }
-    # With PyCBC 2.11.0, the mixed-model crop differed by up to 2.6e-4
-    # of peak SNR, mostly from phase differences in the compiled Ripple
-    # injection. The 1e-3 tolerance covers that difference. With a matched
-    # template, those phase differences mostly cancel and the crop agreed
-    # within 4e-7 of peak SNR.
-    series_tolerance = (
-        1e-6 if config.waveform_approximant == template_approximant else 1e-3
-    )
     assert result.series.shape == (1, len(config.network), config.crop_samples)
     for index, name in enumerate(config.network):
         registered = registry.detectors[name]
@@ -123,24 +116,15 @@ def test_noise_free_series_matches_pycbc(
         peak = np.max(np.abs(crop))
 
         assert result.epochs[0, index] == (start - midpoint) / rate
-        np.testing.assert_allclose(
-            result.series[0, index] / peak,
-            crop / peak,
-            rtol=series_tolerance,
-            atol=series_tolerance,
-        )
-        np.testing.assert_allclose(
-            result.scalars.observed_snr[0, index], peak, rtol=series_tolerance
-        )
-        # The optimal SNR and horizon use waveform norms. Both agreed to
-        # about 2e-7 relative across the two model pairs.
-        np.testing.assert_allclose(
+        assert_close(result.series[0, index] / peak, crop / peak)
+        assert_close(result.scalars.observed_snr[0, index], peak)
+        # The optimal SNR and horizon use waveform norms.
+        assert_close(
             [
                 result.scalars.expected_snr[0, index],
                 result.scalars.horizon[0, index],
             ],
             [pycbc_filter.sigma(d, **kwargs), pycbc_filter.sigma(h, **kwargs)],
-            rtol=1e-6,
         )
 
 
@@ -159,8 +143,10 @@ def test_noise_has_unit_variance_per_quadrature(
     centre = residual.shape[-1] // 2
 
     # 400 draws: the sample variance scatters by about 7%.
-    np.testing.assert_allclose(residual[..., centre].real.var(axis=0), 1.0, rtol=0.3)
-    np.testing.assert_allclose(residual[..., centre].imag.var(axis=0), 1.0, rtol=0.3)
+    variance = residual[..., centre].real.var(axis=0)
+    assert_close(variance, np.ones_like(variance), rtol=0.3)
+    variance = residual[..., centre].imag.var(axis=0)
+    assert_close(variance, np.ones_like(variance), rtol=0.3)
     assert abs(residual[..., centre].mean()) < 0.2
 
 
@@ -176,9 +162,7 @@ def test_results_do_not_depend_on_batching_or_order(
         make_config(tmp_path, batch_size=3), registry
     ).series({name: values[order] for name, values in many.items()})
 
-    np.testing.assert_allclose(
-        shuffled.series, reference.series[order], rtol=0, atol=1e-10
-    )
+    assert_close(shuffled.series, reference.series[order])
     np.testing.assert_array_equal(
         shuffled.scalars.detected, reference.scalars.detected[order]
     )
@@ -201,9 +185,7 @@ def test_detection_rule(
 
     # Loud, far too distant, and a nearby binary neutron star.
     np.testing.assert_array_equal(result.detected, [True, False, True])
-    np.testing.assert_allclose(
-        result.network_snr, np.sqrt(np.sum(result.observed_snr**2, axis=1))
-    )
+    assert_close(result.network_snr, np.sqrt(np.sum(result.observed_snr**2, axis=1)))
 
 
 @pytest.mark.parametrize(
@@ -273,7 +255,7 @@ def test_higher_mode_signal_never_exceeds_its_optimal_snr(
     assert np.all(np.isfinite(result.observed_snr))
     assert np.all(result.observed_snr <= result.expected_snr * (1 + 1e-9))
     # The dominant-mode template recovers most of a higher-mode signal.
-    np.testing.assert_allclose(result.observed_snr, result.expected_snr, rtol=0.05)
+    assert_close(result.observed_snr, result.expected_snr, rtol=0.05)
 
 
 def test_from_config_rejects_a_higher_mode_template(

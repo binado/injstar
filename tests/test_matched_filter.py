@@ -14,6 +14,8 @@ from injstar.matched_filter import (
     second_frequency_cumulant,
 )
 
+from .tolerances import assert_close
+
 SEGMENT_DURATION = 2.0
 SAMPLING_FREQUENCY = 512.0
 DELTA_F = 1 / SEGMENT_DURATION
@@ -74,15 +76,9 @@ def test_inner_product_and_norm_match_pycbc(
         delta_f=DELTA_F,
     )
     assert jnp.isrealobj(inner)
-    # The kernel comparisons share double-precision inputs with PyCBC. The
-    # relative tolerance leaves room for FFT and reduction order, and the
-    # absolute tolerance covers near-zero values in the unit-scale fixtures.
-    np.testing.assert_allclose(inner, overlaps, rtol=1e-7, atol=1e-10)
-    np.testing.assert_allclose(
-        optimal_snr(band_template, inverse_psd=inverse_psd, delta_f=DELTA_F),
-        norms,
-        rtol=1e-7,
-        atol=1e-10,
+    assert_close(inner, overlaps)
+    assert_close(
+        optimal_snr(band_template, inverse_psd=inverse_psd, delta_f=DELTA_F), norms
     )
 
 
@@ -112,7 +108,7 @@ def test_frequency_cumulants_match_pycbc(
         result = cumulant(
             band_template, frequencies=band_frequencies, inverse_psd=inverse_psd
         )
-        np.testing.assert_allclose(result, expected, rtol=1e-7, atol=1e-10)
+        assert_close(result, expected)
 
 
 def test_complex_snr_series_matches_pycbc(
@@ -153,7 +149,7 @@ def test_complex_snr_series_matches_pycbc(
     )
 
     assert result.shape == (2, N_SAMPLES)
-    np.testing.assert_allclose(result, expected, rtol=1e-7, atol=1e-10)
+    assert_close(result, expected)
 
 
 @pytest.mark.parametrize(
