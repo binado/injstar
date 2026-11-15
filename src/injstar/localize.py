@@ -91,22 +91,53 @@ class Network:
     rescale_loglikelihood: float
 
 
-def localize_event(event: Event, network: Network) -> Table:
-    """Localize one event with BAYESTAR.
+@dataclass(frozen=True)
+class BayestarInputs:
+    """Event conditioned as ``ligo.skymap.bayestar.condition`` does.
+
+    Attributes
+    ----------
+    gmst
+        Greenwich mean sidereal time at ``epoch`` in radians.
+    epoch
+        GPS time of the weighted-mean arrival time.
+    first_samples
+        Time of each series' first sample relative to ``epoch``, in seconds.
+    snrs
+        Amplitude and unwrapped phase of the series, float32, shape
+        ``(detectors, samples, 2)``.
+    locations
+        Detector positions in light-seconds relative to the weighted mean
+        position, shape ``(detectors, 3)``.
+    weights
+        Inverse timing variance of each detector.
+    mean_toa
+        Weighted-mean arrival time relative to ``event.coa_time``, in seconds.
+    """
+
+    gmst: float
+    epoch: lal.LIGOTimeGPS
+    first_samples: NDArray[np.float64]
+    snrs: NDArray[np.float32]
+    locations: NDArray[np.float64]
+    weights: NDArray[np.float64]
+    mean_toa: float
+
+
+def condition_event(event: Event, network: Network) -> BayestarInputs:
+    """Condition an event as ``ligo.skymap.bayestar.condition`` does.
+
+    Detector positions and arrival times are centred on their mean weighted by
+    the inverse timing variance, and the series are trimmed to the light-travel
+    time across the network plus 5 ms (or a quarter autocorrelation period if
+    that is longer).
 
     Parameters
     ----------
     event
         Simulated event.
     network
-        Network geometry, sampling and prior.
-
-    Returns
-    -------
-    astropy.table.Table
-        Multi-order sky map with ``UNIQ``, ``PROBDENSITY``, ``DISTMU``,
-        ``DISTSIGMA`` and ``DISTNORM``; ``log_bci`` and ``log_bsn`` are in
-        ``meta``.
+        Network geometry and sampling.
 
     Raises
     ------
@@ -114,8 +145,6 @@ def localize_event(event: Event, network: Network) -> Table:
         If the SNR series has even length or is shorter than BAYESTAR's
         arrival-time window, or if the timing weights are unusable.
     """
-    # Condition as ``ligo.skymap.bayestar.condition`` does.
-    start = time.perf_counter()
     rate = network.sampling_frequency
     weights = np.square(event.snr * event.bandwidth)
     if not np.all(np.isfinite(weights)) or weights.sum() <= 0:
@@ -156,7 +185,43 @@ def localize_event(event: Event, network: Network) -> Table:
     snrs = np.stack(
         (np.abs(series), np.stack([unwrap(np.angle(row)) for row in series])), axis=-1
     )
-    gmst = lal.GreenwichMeanSiderealTime(epoch)
+    return BayestarInputs(
+        gmst=lal.GreenwichMeanSiderealTime(epoch),
+        epoch=epoch,
+        first_samples=first_samples,
+        snrs=snrs.astype(np.float32),
+        locations=locations,
+        weights=weights,
+        mean_toa=float(mean_toa),
+    )
+
+
+def localize_event(event: Event, network: Network) -> Table:
+    """Localize one event with BAYESTAR.
+
+    Parameters
+    ----------
+    event
+        Simulated event.
+    network
+        Network geometry, sampling and prior.
+
+    Returns
+    -------
+    astropy.table.Table
+        Multi-order sky map with ``UNIQ``, ``PROBDENSITY``, ``DISTMU``,
+        ``DISTSIGMA`` and ``DISTNORM``; ``log_bci`` and ``log_bsn`` are in
+        ``meta``.
+
+    Raises
+    ------
+    ValueError
+        If the SNR series has even length or is shorter than BAYESTAR's
+        arrival-time window, or if the timing weights are unusable.
+    """
+    start = time.perf_counter()
+    conditioned = condition_event(event, network)
+    epoch = conditioned.epoch
 
     prior = network.prior
     pixels, log_bci, log_bsn = core.toa_phoa_snr(
@@ -164,12 +229,12 @@ def localize_event(event: Event, network: Network) -> Table:
         prior.max_distance,
         prior.distance_power,
         prior.cosmology,
-        gmst,
+        conditioned.gmst,
         network.sampling_frequency,
-        first_samples,
-        snrs.astype(np.float32),
+        conditioned.first_samples,
+        conditioned.snrs,
         np.asarray(network.responses, dtype=np.float32),
-        locations,
+        conditioned.locations,
         np.asarray(event.horizon, dtype=float),
         network.rescale_loglikelihood,
     )
