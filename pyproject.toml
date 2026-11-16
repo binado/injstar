@@ -43,12 +43,6 @@ pycbc = [
     "lalsuite",
     "pycbc>=2.11.0",
 ]
-validation = [
-    "gwmock-signal>=0.24.0",
-    "pycbc>=2.11.0",
-]
-
-
 [build-system]
 requires = ["uv_build>=0.12.18,<0.14"]
 build-backend = "uv_build"
