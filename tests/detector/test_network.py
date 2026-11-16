@@ -15,10 +15,22 @@ from injstar.detector.psd import NOISE_CURVES_BASE_DIR
 from ..tolerances import assert_close
 
 
-@pytest.mark.parametrize("name", ["H1", "L1", "V1", "K1"])
-def test_packaged_geometry_matches_lal(registry: DetectorRegistry, name: str) -> None:
+@pytest.mark.parametrize(
+    ("name", "reference_name"),
+    [
+        ("H1", "H1"),
+        ("L1", "L1"),
+        ("V1", "V1"),
+        ("K1", "K1"),
+        ("C1", "H1"),
+        ("C2", "L1"),
+    ],
+)
+def test_packaged_geometry_matches_lal(
+    registry: DetectorRegistry, name: str, reference_name: str
+) -> None:
     geometry = registry.detectors[name].geometry
-    reference = lal.cached_detector_by_prefix[name]
+    reference = lal.cached_detector_by_prefix[reference_name]
 
     assert_close(geometry.location, reference.location)
     # LAL tabulates arm directions independently of the geodetic angles.
