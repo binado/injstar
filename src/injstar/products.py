@@ -6,7 +6,7 @@ Nothing here imports JAX.
 """
 
 import csv
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
@@ -238,3 +238,63 @@ def build_summary(output_dir: Path) -> Path:
         writer.writeheader()
         writer.writerows(asdict(summary) for summary in summaries)
     return target
+
+
+def collect_summaries(
+    directories: Iterable[Path], output: Path, *, overwrite: bool = False
+) -> Path:
+    """Combine chunk summaries in original row order without moving maps.
+
+    Parameters
+    ----------
+    directories
+        Explicit localization directories from the same population and
+        scientific configuration. Provenance is the caller's responsibility.
+    output
+        Destination CSV. Its parent directory must exist.
+    overwrite
+        Replace an existing destination.
+
+    Returns
+    -------
+    pathlib.Path
+        The combined summary. Header-only input summaries are accepted.
+
+    Raises
+    ------
+    ValueError
+        If no directories are supplied, columns differ, indices overlap,
+        or the destination exists without overwrite permission.
+    FileNotFoundError
+        If an input summary is missing.
+    """
+    output = Path(output)
+    if output.exists() and not overwrite:
+        raise ValueError(f"{output} exists; pass --overwrite to replace it")
+    names = ("row_index", *statistic_names())
+    rows: dict[int, dict[str, str]] = {}
+    count = 0
+    for directory in directories:
+        count += 1
+        path = Path(directory) / io.SUMMARY_FILE
+        with path.open(newline="") as stream:
+            reader = csv.DictReader(stream)
+            if reader.fieldnames != list(names):
+                raise ValueError(f"{path} has unexpected summary columns")
+            for row in reader:
+                # Parse before opening the destination, including all statistics.
+                if None in row or any(row[name] is None for name in names):
+                    raise ValueError(f"{path} has an incomplete summary row")
+                index = int(row["row_index"])
+                if index in rows:
+                    raise ValueError(f"duplicate row_index {index}")
+                for name in statistic_names():
+                    float(row[name])
+                rows[index] = row
+    if not count:
+        raise ValueError("no summary directories supplied")
+    with output.open("w" if overwrite else "x", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=names)
+        writer.writeheader()
+        writer.writerows(rows[index] for index in sorted(rows))
+    return output

@@ -132,3 +132,94 @@ def test_simulation_events_pass_columns_through(population_csv: Path) -> None:
     np.testing.assert_array_equal(events["gmst"], gmst)
     for name in ("detector_frame_mass_1", "distance", "inclination"):
         np.testing.assert_array_equal(events[name], population[name])
+
+
+@pytest.fixture(params=["csv", "structured", "grouped"])
+def ranged_population(
+    request: pytest.FixtureRequest, population_csv: Path, tmp_path: Path
+) -> Path:
+    """Three rows with optional columns absent and an extra text column."""
+    lines = population_csv.read_text().splitlines()
+    population_csv.write_text(
+        "\n".join(
+            [
+                lines[0] + ",label",
+                *(
+                    line + "," + label
+                    for line, label in zip(lines[1:], ["b", "a", "c"], strict=True)
+                ),
+            ]
+        )
+        + "\n"
+    )
+    if request.param == "csv":
+        return population_csv
+    data = np.genfromtxt(
+        population_csv, delimiter=",", names=True, dtype=None, encoding="utf-8"
+    )
+    data = data.astype(
+        [
+            (name, "S1" if name == "label" else data.dtype[name])
+            for name in data.dtype.names or ()
+        ]
+    )
+    path = tmp_path / "population.h5"
+    with h5py.File(path, "w") as file:
+        if request.param == "structured":
+            file.create_dataset("data", data=data)
+        else:
+            group = file.create_group("data")
+            for name in data.dtype.names or ():
+                group.create_dataset(name, data=data[name])
+    return path
+
+
+@pytest.mark.parametrize(("start", "stop"), [(0, None), (1, 2), (1, None), (2, 100)])
+def test_population_range(
+    ranged_population: Path, start: int, stop: int | None
+) -> None:
+    full = read_population(ranged_population)
+    selected = read_population(ranged_population, start=start, stop=stop)
+    assert tuple(selected) == (*CANONICAL_COLUMNS, "label")
+    for name in full:
+        np.testing.assert_array_equal(selected[name], full[name][start:stop])
+    np.testing.assert_array_equal(
+        selected["lambda_1"], np.zeros(len(selected["label"]))
+    )
+
+
+@pytest.mark.parametrize(
+    ("start", "stop"), [(-1, None), (0, -1), (1, 1), (2, 1), (3, None), (10, 20)]
+)
+def test_invalid_population_range(
+    ranged_population: Path, start: int, stop: int | None
+) -> None:
+    with pytest.raises(ValueError, match="range|no rows"):
+        read_population(ranged_population, start=start, stop=stop)
+
+
+def test_csv_range_infers_selected_values_only(population_csv: Path) -> None:
+    population_csv.write_text(population_csv.read_text().replace("1500.0", "invalid"))
+    selected = read_population(population_csv, start=1, stop=2)
+    np.testing.assert_allclose(selected["distance"], [40000.0])
+
+
+def test_population_validates_only_selected_range(ranged_population: Path) -> None:
+    if ranged_population.suffix == ".csv":
+        ranged_population.write_text(
+            ranged_population.read_text().replace("1500.0", "nan")
+        )
+    else:
+        with h5py.File(ranged_population, "r+") as file:
+            source = file["data"]
+            if isinstance(source, h5py.Dataset):
+                row = source[0]
+                row["distance"] = np.nan
+                source[0] = row
+            else:
+                source["distance"][0] = np.nan
+    np.testing.assert_allclose(
+        read_population(ranged_population, start=1, stop=2)["distance"], [40000.0]
+    )
+    with pytest.raises(ValueError, match="non-finite"):
+        read_population(ranged_population)

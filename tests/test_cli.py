@@ -426,8 +426,143 @@ def test_localize_uses_saved_rows_flags_and_sampling(
     assert code == 0, output
     assert [event.row_index for event, _ in seen] == [2, 1]
     columns = read_population_catalogue(config_file.parent / "out" / "injections.h5")
-    for event, network in seen:
+    for position, (event, network) in zip([0, 2], seen, strict=True):
         for name in ("coa_time", "right_ascension", "declination", "distance"):
-            assert getattr(event, name) == columns[name][event.row_index]
+            assert getattr(event, name) == columns[name][position]
         assert network.sampling_frequency == 8192.0
         np.testing.assert_array_equal(event.series, result.series[event.row_index])
+
+
+def test_noisy_chunks_match_full_injection(config_file: Path) -> None:
+    from injstar.dataset import ARRAY_FIELDS
+
+    config = load_inject_config(config_file)
+    config.run()
+    full = InjectionResult.read(config.output_dir / "injection_results.h5")
+    chunks = []
+    for start, stop, batch_size in [(0, 1, 1), (1, 3, 3)]:
+        chunk = load_inject_config(
+            config_file,
+            start=start,
+            stop=stop,
+            batch_size=batch_size,
+            output_dir=config_file.parent / f"chunk{start}",
+        )
+        chunk.run()
+        chunks.append(InjectionResult.read(chunk.output_dir / "injection_results.h5"))
+        catalogue = read_population_catalogue(chunk.output_dir / "injections.h5")
+        truth = read_population_catalogue(config.output_dir / "injections.h5")
+        for name in truth:
+            np.testing.assert_allclose(catalogue[name], truth[name][start:stop])
+    for name in ARRAY_FIELDS:
+        np.testing.assert_allclose(
+            np.concatenate([np.asarray(getattr(chunk, name)) for chunk in chunks]),
+            getattr(full, name),
+        )
+
+
+def test_selection_overrides_and_legacy_reuse(config_file: Path) -> None:
+    import json
+
+    assert invoke("inject", config_file)[0] == 0
+    out = config_file.parent / "out"
+    target = out / "injections.h5"
+    written = target.stat().st_mtime_ns
+    snapshot = out / "config.json"
+    old = json.loads(snapshot.read_text())
+    del old["start"], old["stop"]
+    snapshot.write_text(json.dumps(old))
+    assert invoke("inject", config_file)[0] == 0
+    assert target.stat().st_mtime_ns == written
+    assert invoke("inject", config_file, "--start", 1)[0] == 1
+    code, output = invoke(
+        "inject",
+        config_file,
+        "--start",
+        1,
+        "--stop",
+        100,
+        "--output-dir",
+        config_file.parent / "chunk",
+    )
+    assert code == 0, output
+    result = InjectionResult.read(config_file.parent / "chunk" / "injection_results.h5")
+    np.testing.assert_array_equal(result.row_index, [1, 2])
+    recorded = json.loads((config_file.parent / "chunk" / "config.json").read_text())
+    assert (recorded["start"], recorded["stop"]) == (1, 100)
+
+
+@pytest.mark.parametrize(("start", "stop"), [(3, 4), (2, 1), (-1, 2), (0, -1)])
+def test_invalid_selection_preserves_output(
+    config_file: Path, start: int, stop: int
+) -> None:
+    assert invoke("inject", config_file)[0] == 0
+    target = config_file.parent / "out" / "injections.h5"
+    before = target.read_bytes()
+    assert (
+        invoke("inject", config_file, "--start", start, "--stop", stop, "--overwrite")[
+            0
+        ]
+        != 0
+    )
+    assert target.read_bytes() == before
+
+
+@pytest.mark.slow
+def test_nonzero_chunk_localization_and_resume(config_file: Path) -> None:
+    from dataclasses import asdict
+
+    from ligo.skymap.io import read_sky_map
+
+    from injstar.products import map_statistics
+
+    chunk = config_file.parent / "chunk"
+    assert (
+        invoke("inject", config_file, "--start", 2, "--stop", 3, "--output-dir", chunk)[
+            0
+        ]
+        == 0
+    )
+    localize_file = make_localize_file(config_file)
+    code, output = invoke("localize", localize_file, "--injection-dir", chunk)
+    assert code == 0, output
+    out = config_file.parent / "localized"
+    assert [path.name for path in (out / "skymaps").iterdir()] == ["2.multiorder.fits"]
+    first = read_summary(out)
+    assert [int(row["row_index"]) for row in first] == [2]
+    truth = read_population_catalogue(chunk / "injections.h5")
+    expected = map_statistics(
+        read_sky_map(str(out / "skymaps" / "2.multiorder.fits"), moc=True, hdu=1),
+        row_index=2,
+        right_ascension=float(truth["right_ascension"][0]),
+        declination=float(truth["declination"][0]),
+        distance=float(truth["distance"][0]),
+    )
+    np.testing.assert_allclose(
+        [float(value) for value in first[0].values()], list(asdict(expected).values())
+    )
+    written = (out / "skymaps" / "2.multiorder.fits").stat().st_mtime_ns
+    code, output = invoke(
+        "localize", localize_file, "--injection-dir", chunk, "--resume"
+    )
+    assert code == 0, output
+    assert read_summary(out) == first
+    assert (out / "skymaps" / "2.multiorder.fits").stat().st_mtime_ns == written
+
+
+def test_collect_summary_cli(tmp_path: Path) -> None:
+    from injstar.products import build_summary
+
+    directories = [tmp_path / "one", tmp_path / "two"]
+    for directory in directories:
+        directory.mkdir()
+        build_summary(directory)
+    target = tmp_path / "combined.csv"
+    code, output = invoke("collect-summary", *directories, "--output", target)
+    assert code == 0, output
+    assert target.read_bytes() == (directories[0] / "summary.csv").read_bytes()
+    assert invoke("collect-summary", *directories, "--output", target)[0] == 1
+    assert (
+        invoke("collect-summary", *directories, "--output", target, "--overwrite")[0]
+        == 0
+    )

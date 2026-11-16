@@ -44,6 +44,8 @@ def load_config[T: BaseModel](path: Path, model: type[T], **overrides: Any) -> T
 
 def _results_key(config: dict[str, Any]) -> dict[str, Any]:
     """Fields that determine scientific results."""
+    if "population" in config:
+        config = {"start": 0, "stop": None, **config}
     return {k: v for k, v in config.items() if k not in _EXECUTION_FIELDS}
 
 

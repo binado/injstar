@@ -185,3 +185,69 @@ just check      # full validation, tests, and package build
 Configure `pypi` and `testpypi` GitHub environments with trusted publishers.
 Push a tag matching the version in `pyproject.toml`, such as `v0.1.0`, to
 publish to PyPI. Run the Release workflow manually to publish to TestPyPI.
+
+### Slurm arrays
+
+Set `start` (default `0`) and `stop` (default EOF) in the injection TOML, or
+use `--start` and `--stop`, to inject a zero-based, half-open range `[start, stop)`.
+A stop beyond EOF is clipped; negative bounds, reversed ranges and empty
+selections are errors, checked before modifying output directories. Only selected
+rows are validated and stored. Original row indices determine noise seeds,
+map names and summary indices, so keep the same root seed across tasks.
+Selection bounds are part of run matching.
+
+CSV ranges use Polars to scan past preceding records and parse the selection.
+CSV still requires sequential scanning; use HDF5 for large populations, where
+the structured `data` dataset or grouped columns are sliced directly.
+
+For a population of 100,000 rows, this script launches ten separate 10,000-row
+jobs. Adjust the array bounds and `chunk_size` to your population size; do not
+launch tasks starting beyond EOF. Submit from the project directory, with the
+population, TOMLs and environment accessible to compute nodes.
+
+```bash
+#!/bin/bash
+#SBATCH --array=0-9
+#SBATCH --cpus-per-task=4
+#SBATCH --output=slurm-%A_%a.log
+set -euo pipefail
+
+chunk_size=10000
+start=$((SLURM_ARRAY_TASK_ID * chunk_size))
+stop=$((start + chunk_size))
+printf -v task '%03d' "$SLURM_ARRAY_TASK_ID"
+
+# Limit CSV and numerical-library thread pools before imports.
+export POLARS_MAX_THREADS=1
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+uv run injstar inject inject.toml --start "$start" --stop "$stop" \
+    --output-dir "runs/injected/$task"
+uv run injstar localize localize.toml \
+    --injection-dir "runs/injected/$task" \
+    --output-dir "runs/localized/$task" \
+    --workers "$SLURM_CPUS_PER_TASK" --resume
+```
+
+Set `threads_per_worker = 1` in the localization TOML for this example. Allocate
+at least `workers × threads_per_worker` CPUs per task. Injection retains its
+existing JAX batching; localization retains its batch size and worker pool.
+Each array task owns separate stage directories. On retry, injection reuses a
+matching completed run (or recomputes an incomplete one), and localization
+`--resume` skips completed original-index maps and rebuilds the summary.
+
+After all array tasks finish successfully, collect their summaries:
+
+```console
+uv run injstar collect-summary runs/localized/* --output runs/summary.csv
+```
+
+The Python equivalent is `injstar.products.collect_summaries(directories,
+output, overwrite=False)` (pass `overwrite` by keyword). Inputs must be explicit
+localization directories from the same population and scientific configuration;
+provenance is the caller's responsibility. The collector validates all inputs,
+sorts numerically by original `row_index`, and rejects duplicates or missing
+summaries. Header-only summaries are accepted. An existing destination requires
+`--overwrite`. Maps and injection products stay in their task directories.
