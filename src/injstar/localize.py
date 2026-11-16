@@ -29,6 +29,7 @@ from numpy.typing import NDArray
 from injstar import __version__
 from injstar.constants import ARRIVAL_TIME_MARGIN_S, SPEED_OF_LIGHT_M_S
 from injstar.io import skymap_path
+from injstar.products import map_statistics
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,10 @@ class Event:
     ----------
     row_index
         Identifier from the population.
+    right_ascension, declination
+        True sky position in radians.
+    distance
+        True luminosity distance in Mpc.
     coa_time
         Geocentric coalescence GPS time in seconds.
     series
@@ -54,6 +59,9 @@ class Event:
     """
 
     row_index: int
+    right_ascension: float
+    declination: float
+    distance: float
     coa_time: float
     series: NDArray[np.complex128]
     epochs: NDArray[np.float64]
@@ -326,12 +334,20 @@ def localize_to_file(
         cosmology=cosmology,
         rescale_loglikelihood=rescale_loglikelihood,
     )
+    summary = map_statistics(
+        skymap,
+        row_index=event.row_index,
+        right_ascension=event.right_ascension,
+        declination=event.declination,
+        distance=event.distance,
+    )
     target = skymap_path(output_dir, event.row_index)
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(f".{target.name}.{os.getpid()}.partial.fits")
     try:
         partial.unlink(missing_ok=True)
         fits.write_sky_map(str(partial), skymap, moc=True)
+        summary.dump_fits(partial)
         os.replace(partial, target)
     finally:
         partial.unlink(missing_ok=True)

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 INJECTION_RESULTS_FILE = "injection_results.h5"
 INJECTIONS_FILE = "injections.h5"
-SUMMARY_FILE = "summary.h5"
+SUMMARY_FILE = "summary.csv"
 CONFIG_FILE = "config.json"
 
 

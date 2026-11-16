@@ -2,7 +2,6 @@
 
 from injstar.cli import inject as inject
 from injstar.cli import localize as localize
-from injstar.cli import summarise as summarise
 from injstar.cli._app import app, main
 
 __all__ = ["app", "main"]

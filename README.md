@@ -54,7 +54,6 @@ max_distance = 5000.0            # Mpc, required only for localization
 uv run injstar inject inject.toml
 uv run injstar localize localize.toml
 uv run injstar localize localize.toml --resume
-uv run injstar summarise localized
 ```
 
 `inject` generates waveforms, noise, SNRs and detection flags. `localize` reads
@@ -69,8 +68,8 @@ available and consistent.
 | Injection | `injection_results.h5` | Complete SNRs, horizons, bandwidths, complex series, epochs and original row indices, with detector order and sample rate. |
 | Injection | `injections.h5` | Population truth, per-detector and network SNR, `detected`. |
 | Localization | `injections.h5` | Relative symlink to the injection catalogue. |
-| Localization | `skymaps/<row_index>.multiorder.fits` | BAYESTAR maps for detected events. |
-| Localization | `summary.h5` | Catalogue plus localization and distance statistics. |
+| Localization | `skymaps/<row_index>.multiorder.fits` | BAYESTAR maps (extension 1) and a one-row `SUMMARY` binary table for detected events. |
+| Localization | `summary.csv` | Stored localization statistics, one row per localized event. |
 | Both | `config.json` | Validated configuration for that stage, with absolute paths. |
 
 Paths in TOML resolve relative to the TOML file; CLI path overrides resolve
@@ -86,7 +85,27 @@ in batches of `batch_size`. The catalogues use gwmock-pop’s structured `data`
 dataset and store text as UTF-8 bytes.
 
 The catalogue symlink depends on the injection directory; moving both directories
-together preserves it. `summarise` follows it to rebuild the summary. The old
+together preserves it. `localize` automatically collects stored FITS summaries
+into `summary.csv`, including on resume without rerunning completed events.
+The Python entry point `injstar.products.build_summary(output_dir)` rebuilds
+the CSV without the injection catalogue or sky-map pixel data.
+
+CSV columns, in order, are `row_index`, `area_50`, `area_90`, `searched_area`,
+`searched_prob`, `searched_prob_dist`, `searched_prob_vol`, `offset`,
+`distance_q05`, `distance_q50`, `distance_q95`, `distance_lost_prob`, `distmean`,
+`diststd`, `log_bci`, `log_bsn`. Areas are in square degrees, offset in degrees,
+and distances in Mpc; probabilities and log Bayes factors are dimensionless.
+`row_index` is the zero-based original catalogue index. Rows are sorted by that
+index and include only localized events, with no injection metadata or
+`localized` flag. Unavailable statistics are `nan`; an empty run writes only
+the header. FITS stores the same columns with an integer index and float64
+statistics; the `SUMMARY` extension is the source for the CSV. Read sky maps
+with `hdu=1`.
+
+This is a hard format break: existing maps without `SUMMARY` and old
+`summary.h5` products are unsupported, with no migration or fallback. Rerun
+localization with `--overwrite` to regenerate products. The `summarise`
+command is removed. The old
 `snr` and `run` commands and combined configuration are removed. Split existing
 TOML files into the two stages and use separate output directories.
 
@@ -99,7 +118,7 @@ index determines noise seeds and sky-map filenames. The spin components
 `spin_1x` to `spin_2z`, the tidal deformabilities `lambda_1` and `lambda_2` and the orbital phase
 `coa_phase` (radians) are optional and default to zero. Which of them a run reads depends on the waveform model
 (`waveform_approximant`); a column the model does not read is ignored.
-Extra columns retain their original names in both output tables. Names reserved
+Extra columns retain their original names in the injection catalogue. Names reserved
 for generated output columns (including per-detector SNRs, detection flags,
 and summary statistics) are rejected.
 

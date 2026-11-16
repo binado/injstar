@@ -1,4 +1,4 @@
-"""Lightweight CLI for injection, localization and summary rebuilding."""
+"""Lightweight CLI for injection and localization."""
 
 import logging
 from collections.abc import Callable, Sequence
@@ -20,10 +20,6 @@ app = typer.Typer(
 ConfigArgument = Annotated[
     Path,
     typer.Argument(exists=True, dir_okay=False, help="Run config TOML file."),
-]
-RunDirectoryArgument = Annotated[
-    Path,
-    typer.Argument(exists=True, file_okay=False, help="Output directory of the run."),
 ]
 OutputDirOption = Annotated[
     Path | None,

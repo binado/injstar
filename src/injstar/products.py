@@ -1,40 +1,89 @@
 """Run products.
 
-Computes per-map statistics and joins them with the injection table to build
-``summary.h5``, including one row per injection and non-detections.
+Computes per-map statistics, stores them in FITS and collects them in CSV.
 
 Nothing here imports JAX.
 """
 
+import csv
 from collections.abc import Callable
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
+from typing import TYPE_CHECKING, Self
 
 import numpy as np
-from gwmock_pop.loaders.file_loader import read_population_catalogue
 from numpy.typing import NDArray
 
 from injstar import io
+
+if TYPE_CHECKING:
+    from astropy.table import Table
 
 #: Credible levels of the sky areas and distance quantiles in the summary.
 CONTOUR_LEVELS = (0.5, 0.9)
 DISTANCE_QUANTILES = (0.05, 0.5, 0.95)
 
 
+@dataclass(frozen=True)
+class LocalizationSummary:
+    """One localization's statistics and zero-based injection row index.
+
+    Areas are in square degrees, offset in degrees, and distances in Mpc.
+    Probabilities and log Bayes factors are dimensionless.
+    """
+
+    row_index: int
+    area_50: float
+    area_90: float
+    searched_area: float
+    searched_prob: float
+    searched_prob_dist: float
+    searched_prob_vol: float
+    offset: float
+    distance_q05: float
+    distance_q50: float
+    distance_q95: float
+    distance_lost_prob: float
+    distmean: float
+    diststd: float
+    log_bci: float
+    log_bsn: float
+
+    def dump_fits(self, path: Path) -> None:
+        """Append or replace the one-row ``SUMMARY`` extension in a FITS file."""
+        from astropy.io import fits
+
+        columns = [fits.Column(name="row_index", format="K", array=[self.row_index])]
+        columns.extend(
+            fits.Column(name=name, format="D", array=[getattr(self, name)])
+            for name in statistic_names()
+        )
+        summary = fits.BinTableHDU.from_columns(columns, name="SUMMARY")
+        with fits.open(path, mode="update") as hdus:
+            if "SUMMARY" in hdus:
+                hdus["SUMMARY"] = summary
+            else:
+                hdus.append(summary)
+
+    @classmethod
+    def from_fits(cls, path: Path) -> Self:
+        """Read stored statistics; missing ``SUMMARY`` raises ``ValueError``."""
+        from astropy.io import fits
+
+        with fits.open(path) as hdus:
+            if "SUMMARY" not in hdus:
+                raise ValueError(f"{path} has no SUMMARY extension")
+            row = hdus["SUMMARY"].data[0]
+            return cls(
+                row_index=int(row["row_index"]),
+                **{name: float(row[name]) for name in statistic_names()},
+            )
+
+
 def statistic_names() -> tuple[str, ...]:
     """Names of the per-map columns of the summary, in order."""
-    return (
-        *(f"area_{round(100 * level)}" for level in CONTOUR_LEVELS),
-        "searched_area",
-        "searched_prob",
-        "searched_prob_dist",
-        "searched_prob_vol",
-        "offset",
-        *(f"distance_q{round(100 * q):02d}" for q in DISTANCE_QUANTILES),
-        "distance_lost_prob",
-        "distmean",
-        "diststd",
-        "log_bci",
-        "log_bsn",
+    return tuple(
+        field.name for field in fields(LocalizationSummary) if field.name != "row_index"
     )
 
 
@@ -80,14 +129,21 @@ def _distance_statistics(
 
 
 def map_statistics(
-    path: Path, *, right_ascension: float, declination: float, distance: float
-) -> dict[str, float]:
+    skymap: "Table",
+    *,
+    row_index: int,
+    right_ascension: float,
+    declination: float,
+    distance: float,
+) -> LocalizationSummary:
     """Statistics of one sky map against the true source position.
 
     Parameters
     ----------
-    path
-        Multi-order FITS sky map.
+    skymap
+        In-memory multi-order sky map.
+    row_index
+        Zero-based injection catalogue index.
     right_ascension, declination
         True position in radians.
     distance
@@ -95,7 +151,7 @@ def map_statistics(
 
     Returns
     -------
-    dict of str to float
+    LocalizationSummary
         The columns of :func:`statistic_names`. Areas are in square degrees,
         ``offset`` in degrees, distances in Mpc.
 
@@ -125,10 +181,8 @@ def map_statistics(
     from astropy.coordinates import SkyCoord
     from ligo.skymap import distance as skymap_distance
     from ligo.skymap import moc
-    from ligo.skymap.io import read_sky_map
     from ligo.skymap.postprocess.crossmatch import crossmatch
 
-    skymap = read_sky_map(str(path), moc=True)
     truth = SkyCoord(
         right_ascension * units.rad, declination * units.rad, distance * units.Mpc
     )
@@ -155,46 +209,32 @@ def map_statistics(
         skymap.meta.get("log_bci", np.nan),
         skymap.meta.get("log_bsn", np.nan),
     )
-    return {
-        name: float(value)
-        for name, value in zip(statistic_names(), values, strict=True)
-    }
+    return LocalizationSummary(
+        row_index=row_index,
+        **{
+            name: float(value)
+            for name, value in zip(statistic_names(), values, strict=True)
+        },
+    )
 
 
 def build_summary(output_dir: Path) -> Path:
-    """Join ``injections.h5`` with the statistics of every sky map present.
+    """Collect stored FITS summaries into ``summary.csv``, sorted by row index.
 
-    Rows without a sky map (non-detections, or events not localized yet) get
-    NaN statistics and a false ``localized`` flag.
-
-    Parameters
-    ----------
-    output_dir
-        Run directory.
-
-    Returns
-    -------
-    pathlib.Path
-        The written ``summary.h5``.
+    Only completed maps under ``skymaps/`` contribute rows. No pixel data or
+    injection catalogue is read. An empty run produces a header-only CSV.
     """
     output_dir = Path(output_dir)
-    columns = read_population_catalogue(output_dir / io.INJECTIONS_FILE)
-    count = len(columns["detected"])
-    statistics = {name: np.full(count, np.nan) for name in statistic_names()}
-    localized = np.zeros(count, dtype=bool)
-    for row in range(count):
-        path = io.skymap_path(output_dir, row)
-        if not path.is_file():
-            continue
-        values = map_statistics(
-            path,
-            right_ascension=float(columns["right_ascension"][row]),
-            declination=float(columns["declination"][row]),
-            distance=float(columns["distance"][row]),
-        )
-        for name, value in values.items():
-            statistics[name][row] = value
-        localized[row] = True
-    columns["localized"] = localized
-    columns.update(statistics)
-    return io.write_table(output_dir / io.SUMMARY_FILE, columns)
+    summaries = sorted(
+        (
+            LocalizationSummary.from_fits(path)
+            for path in (output_dir / "skymaps").glob("*.multiorder.fits")
+        ),
+        key=lambda summary: summary.row_index,
+    )
+    target = output_dir / io.SUMMARY_FILE
+    with target.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=("row_index", *statistic_names()))
+        writer.writeheader()
+        writer.writerows(asdict(summary) for summary in summaries)
+    return target

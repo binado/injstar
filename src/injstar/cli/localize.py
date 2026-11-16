@@ -21,7 +21,7 @@ def localize(
     overwrite: OverwriteOption = False,
     resume: ResumeOption = False,
 ) -> None:
-    """Localize saved injection results with BAYESTAR."""
+    """Localize saved injections with BAYESTAR and write summary.csv."""
 
     def stage() -> None:
         from injstar.config import load_localize_config
