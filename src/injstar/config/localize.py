@@ -164,7 +164,6 @@ def _run(
     )
 
     if len(todo):
-        # ligo.skymap is imported here so that `injstar inject` never loads it.
         from injstar.dataset import InjectionResult
         from injstar.localize import Event, Network, localize_to_file
 

@@ -1,8 +1,6 @@
 """Run products.
 
 Computes per-map statistics, stores them in FITS and collects them in CSV.
-
-Nothing here imports JAX.
 """
 
 from collections.abc import Callable, Iterable
@@ -19,7 +17,6 @@ from injstar import io
 if TYPE_CHECKING:
     from astropy.table import Table
 
-#: Credible levels of the sky areas and distance quantiles in the summary.
 CONTOUR_LEVELS = (0.5, 0.9)
 DISTANCE_QUANTILES = (0.05, 0.5, 0.95)
 
@@ -111,8 +108,7 @@ def _distance_statistics(
     distmu, distsigma, distnorm
         Distance-ansatz parameters of each pixel.
     marginal_ppf
-        ``ligo.skymap.distance.marginal_ppf``, passed in to keep that import
-        lazy.
+        ``ligo.skymap.distance.marginal_ppf``.
 
     Returns
     -------
@@ -184,7 +180,6 @@ def map_statistics(
     condition. The sky statistics (areas, ``searched_prob``, ``offset``) do not
     depend on the distance layer.
     """
-    # Heavy, and only the summary needs them.
     from astropy import units
     from astropy.coordinates import SkyCoord
     from ligo.skymap import distance as skymap_distance

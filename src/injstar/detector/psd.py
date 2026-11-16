@@ -9,8 +9,6 @@ file holds a PSD or an ASD is stated explicitly, never guessed.
 infinite contribution to an inverse-variance sum. Calling a
 :class:`Sensitivity` maps them to ``inf`` instead, so out-of-band bins
 contribute nothing.
-
-Nothing here imports JAX.
 """
 
 from dataclasses import dataclass, field
@@ -48,7 +46,6 @@ def resolve_psd_path(reference: str | Path) -> Path | str:
     """
     reference_str = str(reference)
 
-    # Only bare preset names need gwmock-noise's bundled-resource lookup.
     if not Path(reference_str).suffix and not any(
         separator in reference_str for separator in ("/", "\\")
     ):

@@ -74,7 +74,6 @@ def _main(
 
 def _guarded[T](stage: Callable[[], T]) -> T:
     """Run a stage, turning input and run-directory errors into CLI errors."""
-    # Keep validation imports out of --help.
     from pydantic import ValidationError
 
     from injstar.config._common import RunDirectoryError

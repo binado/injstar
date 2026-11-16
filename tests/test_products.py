@@ -218,7 +218,6 @@ def test_collect_stored_summaries(
         path.parent.mkdir(exist_ok=True)
         shutil.copyfile(map_file, path)
         value.dump_fits(path)
-    # Incomplete worker files never contribute a row.
     (path.parent / ".3.multiorder.fits.123.partial.fits").write_text("incomplete")
     target = build_summary(tmp_path)
     assert target == tmp_path / "summary.csv"

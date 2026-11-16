@@ -21,8 +21,6 @@ merged on top and uses the same tables::
 
     [networks]
     mine = ["X1", "H1", "L1"]
-
-Nothing here imports JAX.
 """
 
 import math
@@ -40,8 +38,6 @@ from pydantic.dataclasses import dataclass
 from injstar.constants import WGS84_FLATTENING, WGS84_SEMI_MAJOR_AXIS_M
 from injstar.detector.psd import PsdKind, Sensitivity, resolve_psd_path
 
-#: The packaged detector geometry and sensitivity tables, the first layers of
-#: every merge.
 DETECTOR_DEFAULT_PATHS = tuple(
     Path(__file__).parent.parent / "data" / filename
     for filename in ("geometry.toml", "sensitivity.toml")

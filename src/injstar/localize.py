@@ -9,8 +9,6 @@ event, and applies the postprocessing of ``ligo.skymap.bayestar.localize``.
 and arrival times are centred on their mean weighted by the inverse timing
 variance, and the series are trimmed to the light-travel time across the
 network plus 5 ms (or a quarter autocorrelation period if that is longer).
-
-Nothing here imports JAX.
 """
 
 import os
@@ -174,7 +172,6 @@ def condition_event(event: Event, network: Network) -> BayestarInputs:
         epochs = epochs + trim / rate
         length = desired
 
-    # Arrival times are the centre samples; centre them on their weighted mean.
     toas = epochs + 0.5 * (length - 1) / rate
     mean_toa = np.average(toas, weights=weights)
     seconds = int(np.floor(event.coa_time))
@@ -255,8 +252,6 @@ def localize_event(
     )
     skymap = Table(pixels, copy=False)
 
-    # As in ligo.skymap.bayestar.localize: moments to ansatz parameters, then
-    # the marginal distance moments.
     distmean = skymap.columns.pop("DISTMEAN")
     diststd = skymap.columns.pop("DISTSTD")
     skymap["DISTMU"], skymap["DISTSIGMA"], skymap["DISTNORM"] = (

@@ -183,7 +183,6 @@ def test_localize_resume_and_summary(
         assert summary.area_90 > summary.area_50
         assert float(row["area_90"]) == summary.area_90
 
-    # A finished directory is not silently redone.
     assert invoke("localize", localize_file)[0] == 1
     assert invoke("localize", localize_file, "--resume", "--overwrite")[0] == 1
 
@@ -264,7 +263,6 @@ def test_incomplete_simulation_is_recomputed(config_file: Path, missing: str) ->
     assert invoke("inject", config_file)[0] == 0
     out = config_file.parent / "out"
     (out / missing).unlink()
-    # A legacy CSV is irrelevant to completion of the simulation stage.
     (out / "snr.csv").write_text("legacy")
     code, output = invoke("inject", config_file)
     assert code == 0, output
@@ -396,7 +394,6 @@ def test_localize_uses_saved_rows_flags_and_sampling(
         **{name: np.asarray(getattr(result, name))[order] for name in ARRAY_FIELDS},
         sampling_frequency=8192.0,
     ).write(source)
-    # Saved flags, rather than the catalogue's derived flags, select events.
     with h5py.File(source, "r+") as saved:
         saved["detected"][:] = [True, False, True]
     seen: list[tuple[Event, Network]] = []

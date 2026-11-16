@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
-from gwmock_pop.loaders.file_loader import write_population_catalogue
 from numpy.typing import NDArray
 
 INJECTION_RESULTS_FILE = "injection_results.h5"
@@ -15,6 +14,8 @@ CONFIG_FILE = "config.json"
 
 def write_table(path: Path, columns: Mapping[str, NDArray]) -> Path:
     """Write a gwmock-pop HDF5 catalogue, encoding text as UTF-8 bytes."""
+    from gwmock_pop.loaders.file_loader import write_population_catalogue
+
     arrays = {
         name: np.char.encode(values, "utf-8") if values.dtype.kind == "U" else values
         for name, values in columns.items()

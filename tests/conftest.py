@@ -19,7 +19,6 @@ from injstar.runtime import configure_runtime
 from injstar.waveform import waveform
 from injstar.waveform.pycbc import PyCBCWaveformGenerator
 
-# 64-bit JAX has to be chosen before any test touches the backend.
 configure_runtime()
 
 POPULATION_HEADER = (

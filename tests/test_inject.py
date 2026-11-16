@@ -118,7 +118,6 @@ def test_noise_free_series_matches_pycbc(
         assert result.epochs[0, index] == (start - midpoint) / rate
         assert_close(result.series[0, index] / peak, crop / peak)
         assert_close(result.observed_snr[0, index], peak)
-        # The optimal SNR and horizon use waveform norms.
         assert_close(
             [
                 result.expected_snr[0, index],
@@ -184,7 +183,6 @@ def test_detection_rule(
 ) -> None:
     result = inject(events, config=make_config(tmp_path), network=registry)
 
-    # Loud, far too distant, and a nearby binary neutron star.
     np.testing.assert_array_equal(result.detected, [True, False, True])
     assert_close(result.network_snr, np.sqrt(np.sum(result.observed_snr**2, axis=1)))
 
@@ -202,7 +200,6 @@ def test_tidal_model_gives_finite_positive_horizons(
 
     horizon = inject(tidal_events, config=config, network=registry).horizon
 
-    # The last row is the binary neutron star.
     assert np.all(np.isfinite(horizon[2]))
     assert np.all(horizon[2] > 0)
 
@@ -226,7 +223,6 @@ def test_higher_mode_signal_never_exceeds_its_optimal_snr(
     assert np.all(np.isfinite(result.expected_snr))
     assert np.all(np.isfinite(result.observed_snr))
     assert np.all(result.observed_snr <= result.expected_snr * (1 + 1e-9))
-    # The dominant-mode template recovers most of a higher-mode signal.
     assert_close(result.observed_snr, result.expected_snr, rtol=0.05)
 
 

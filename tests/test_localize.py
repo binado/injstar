@@ -43,7 +43,6 @@ def test_zero_noise_map_contains_the_truth(
         declination=-0.4,
         distance=1500.0,
     )
-    # Without noise the truth sits at the peak of the likelihood.
     assert statistics.searched_prob < 0.5
     assert statistics.searched_area < statistics.area_90
     assert statistics.distance_q05 < 1500.0 < statistics.distance_q95
