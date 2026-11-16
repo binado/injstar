@@ -13,12 +13,13 @@ MODULES = [
     "detector.network",
     "detector.projection",
     "detector.psd",
-    "pipeline",
+    "config.inject",
+    "config.localize",
     "population",
     "io",
     "products",
     "runtime",
-    "simulate",
+    "inject",
     "waveform",
 ]
 

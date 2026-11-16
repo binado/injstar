@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from injstar.config import RunConfig
+from injstar.config import InjectConfig
 from injstar.dataset import InjectionResult
 from injstar.detector.network import (
     DetectorGeometry,
@@ -12,10 +12,10 @@ from injstar.detector.network import (
     load_detector_config,
 )
 from injstar.detector.projection import Detector
+from injstar.inject import greenwich_sidereal_time, inject_events
 from injstar.localize import Event, Network
 from injstar.population import read_population, simulation_events
 from injstar.runtime import configure_runtime
-from injstar.simulate import greenwich_sidereal_time, inject_events
 from injstar.waveform import waveform
 from injstar.waveform.pycbc import PyCBCWaveformGenerator
 
@@ -117,34 +117,31 @@ def population_csv(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def config_file(tmp_path: Path, population_csv: Path) -> Path:
-    path = tmp_path / "run.toml"
+    path = tmp_path / "inject.toml"
     path.write_text(
         'network = ["H1", "L1", "V1"]\n'
         f'population = "{population_csv.name}"\n'
         'output_dir = "out"\n'
         "segment_duration = 4.0\n"
         "batch_size = 2\n"
-        "[prior]\n"
-        "max_distance = 5000.0\n"
     )
     return path
 
 
-def make_config(tmp_path: Path, **fields: object) -> RunConfig:
+def make_config(tmp_path: Path, **fields: object) -> InjectConfig:
     defaults: dict[str, object] = {
         "network": ("H1", "L1", "V1"),
         "population": tmp_path / "population.csv",
         "output_dir": tmp_path / "out",
         "segment_duration": 4.0,
-        "prior": {"max_distance": 5000.0},
     }
-    return RunConfig.model_validate(defaults | fields)
+    return InjectConfig.model_validate(defaults | fields)
 
 
 def inject(
     events: dict[str, np.ndarray],
     *,
-    config: RunConfig,
+    config: InjectConfig,
     network: DetectorRegistry,
     rows: np.ndarray | None = None,
 ) -> InjectionResult:
@@ -158,8 +155,16 @@ def inject(
             config.template_approximant or config.waveform_approximant,
             reference_frequency=config.reference_frequency,
         ),
-        network=network,
-        config=config,
+        network=network.select(config.network),
+        minimum_frequency=config.minimum_frequency,
+        maximum_frequency=config.maximum_frequency,
+        sampling_frequency=config.sampling_frequency,
+        segment_duration=config.segment_duration,
+        crop_duration=config.crop_duration,
+        noise=config.noise,
+        seed=config.seed,
+        batch_size=config.batch_size,
+        **config.detection.model_dump(),
         rows=rows,
     )
 
@@ -188,7 +193,5 @@ def event_and_network(
         bandwidth=np.asarray(drawn.bandwidth[0]),
         horizon=np.asarray(drawn.horizon[0]),
     )
-    network = Network(
-        names, responses, locations, config.sampling_frequency, config.prior, 1.0
-    )
+    network = Network(names, responses, locations, config.sampling_frequency)
     return event, network

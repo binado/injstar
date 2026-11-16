@@ -14,5 +14,5 @@ def test_help_lists_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--help"]) == 0
 
     out = capsys.readouterr().out
-    for command in ("snr", "run", "summarise"):
+    for command in ("inject", "localize", "summarise"):
         assert command in out

@@ -24,52 +24,71 @@ The underlying command is `uv sync --all-groups` if Just is unavailable.
 
 ## Run
 
-A run is one TOML file. This is the reference config,
-[tests/fixtures/run.toml](tests/fixtures/run.toml):
+Injection and localization have separate TOML files and output directories. See
+[the injection example](tests/fixtures/inject.toml) and
+[the localization example](tests/fixtures/localize.toml), which share
+[detector configuration](tests/fixtures/detectors.toml).
 
 ```toml
-network = ["H1", "L1", "V1"]     # detector names, or a name from [networks]
+# inject.toml
+network = "reference"
+detector_config = ["detectors.toml"]
 population = "population.csv"    # CSV or HDF5, gwmock-pop layout
-output_dir = "out"
-
+output_dir = "injected"
 minimum_frequency = 20.0
 maximum_frequency = 1024.0
+```
+
+```toml
+# localize.toml
+network = "reference"
+detector_config = ["detectors.toml"]
+injection_dir = "injected"
+output_dir = "localized"
 
 [prior]
-max_distance = 5000.0            # Mpc, required
+max_distance = 5000.0            # Mpc, required only for localization
 ```
 
 ```console
-uv run injstar snr run.toml        # SNRs and detection flags only
-uv run injstar run run.toml        # also one BAYESTAR sky map per detection
-uv run injstar run run.toml --resume   # finish an interrupted run
-uv run injstar summarise out       # rebuild summary.h5 from the sky maps
+uv run injstar inject inject.toml
+uv run injstar localize localize.toml
+uv run injstar localize localize.toml --resume
+uv run injstar summarise localized
 ```
 
-`snr` never calls BAYESTAR, so it is the cheap way to size a run. `run`
-reuses its result. The population file needs no SNR column; any it has is
-carried through under its original name and not used.
+`inject` generates waveforms, noise, SNRs and detection flags. `localize` reads
+completed injection products and never generates waveforms or noise. Separate
+localization directories can reuse one injection directory with different priors.
+The configured detector order must match the saved detector axis; the sample
+rate comes from the dataset. Population and detector source files must remain
+available and consistent.
 
-The output directory holds:
+| Directory | File | Contents |
+| --- | --- | --- |
+| Injection | `injection_results.h5` | Complete SNRs, horizons, bandwidths, complex series, epochs and original row indices, with detector order and sample rate. |
+| Injection | `injections.h5` | Population truth, per-detector and network SNR, `detected`. |
+| Localization | `injections.h5` | Relative symlink to the injection catalogue. |
+| Localization | `skymaps/<row_index>.multiorder.fits` | BAYESTAR maps for detected events. |
+| Localization | `summary.h5` | Catalogue plus localization and distance statistics. |
+| Both | `config.json` | Validated configuration for that stage, with absolute paths. |
 
-| File | Contents |
-| --- | --- |
-| `injection_results.h5` | Complete batched results for every injection: SNRs, horizons, bandwidths, complex series, epochs and original population row indices; detector order and sampling frequency are shared attributes. |
-| `injections.h5` | One row per injection: truth, expected and observed SNR per detector, network SNR, `detected`. |
-| `skymaps/<row_index>.multiorder.fits` | BAYESTAR sky map of each detected event. |
-| `summary.h5` | `injections.h5` plus 50% and 90% areas, searched area and probability, distance quantiles, `log_bci`, `log_bsn`. |
-| `config.json` | The run config as validated, with paths made absolute. |
+Paths in TOML resolve relative to the TOML file; CLI path overrides resolve
+relative to the working directory. A matching completed injection directory is
+reused. Localization supports `--resume` to skip existing maps, or `--overwrite`
+to redo its products. Overlapping stage directories are rejected, and foreign
+contents are protected from deletion. Execution settings (batch size, worker
+and thread counts, output directory) do not affect config matching.
 
 Results are chunked and uncompressed. The complex128 series alone uses
-`16 × injections × detectors × crop_samples` bytes. Simulation and localization
-stream series in batches of `batch_size`; localization reuses the stored series.
-Both HDF5 injection products must exist to reuse the simulation stage. Older
-runs containing only `snr.csv` are recomputed.
+`16 × injections × detectors × crop_samples` bytes. Both stages stream series
+in batches of `batch_size`. The catalogues use gwmock-pop’s structured `data`
+dataset and store text as UTF-8 bytes.
 
-The `injections.h5` and `summary.h5` catalogues use gwmock-pop’s structured
-`data` dataset. Text columns are
-stored as UTF-8 bytes. Run directories created with the previous table layout
-must be regenerated before resuming or summarising.
+The catalogue symlink depends on the injection directory; moving both directories
+together preserves it. `summarise` follows it to rebuild the summary. The old
+`snr` and `run` commands and combined configuration are removed. Split existing
+TOML files into the two stages and use separate output directories.
 
 ### Population columns
 

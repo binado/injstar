@@ -27,7 +27,6 @@ from ligo.skymap.io import fits
 from numpy.typing import NDArray
 
 from injstar import __version__
-from injstar.config import PriorConfig
 from injstar.constants import ARRIVAL_TIME_MARGIN_S, SPEED_OF_LIGHT_M_S
 from injstar.io import skymap_path
 
@@ -77,18 +76,12 @@ class Network:
         Earth-fixed positions in metres, shape ``(detectors, 3)``.
     sampling_frequency
         Sample rate of the SNR series in Hz.
-    prior
-        Distance prior.
-    rescale_loglikelihood
-        BAYESTAR's log-likelihood scale factor.
     """
 
     names: tuple[str, ...]
     responses: NDArray[np.float64]
     locations: NDArray[np.float64]
     sampling_frequency: float
-    prior: PriorConfig
-    rescale_loglikelihood: float
 
 
 @dataclass(frozen=True)
@@ -196,7 +189,16 @@ def condition_event(event: Event, network: Network) -> BayestarInputs:
     )
 
 
-def localize_event(event: Event, network: Network) -> Table:
+def localize_event(
+    event: Event,
+    network: Network,
+    *,
+    min_distance: float = 0.0,
+    max_distance: float,
+    distance_power: int = 2,
+    cosmology: bool = False,
+    rescale_loglikelihood: float = 1.0,
+) -> Table:
     """Localize one event with BAYESTAR.
 
     Parameters
@@ -204,7 +206,13 @@ def localize_event(event: Event, network: Network) -> Table:
     event
         Simulated event.
     network
-        Network geometry, sampling and prior.
+        Network geometry and sampling.
+    min_distance, max_distance
+        Distance-prior bounds in Mpc.
+    distance_power, cosmology
+        Prior power and whether to apply BAYESTAR's cosmological correction.
+    rescale_loglikelihood
+        BAYESTAR log-likelihood scale factor.
 
     Returns
     -------
@@ -223,12 +231,11 @@ def localize_event(event: Event, network: Network) -> Table:
     conditioned = condition_event(event, network)
     epoch = conditioned.epoch
 
-    prior = network.prior
     pixels, log_bci, log_bsn = core.toa_phoa_snr(
-        prior.min_distance,
-        prior.max_distance,
-        prior.distance_power,
-        prior.cosmology,
+        min_distance,
+        max_distance,
+        distance_power,
+        cosmology,
         conditioned.gmst,
         network.sampling_frequency,
         conditioned.first_samples,
@@ -236,7 +243,7 @@ def localize_event(event: Event, network: Network) -> Table:
         np.asarray(network.responses, dtype=np.float32),
         conditioned.locations,
         np.asarray(event.horizon, dtype=float),
-        network.rescale_loglikelihood,
+        rescale_loglikelihood,
     )
     skymap = Table(pixels, copy=False)
 
@@ -274,7 +281,17 @@ def localize_event(event: Event, network: Network) -> Table:
     return skymap
 
 
-def localize_to_file(event: Event, network: Network, output_dir: Path) -> int:
+def localize_to_file(
+    event: Event,
+    network: Network,
+    output_dir: Path,
+    *,
+    min_distance: float = 0.0,
+    max_distance: float,
+    distance_power: int = 2,
+    cosmology: bool = False,
+    rescale_loglikelihood: float = 1.0,
+) -> int:
     """Localize one event and write its sky map; the worker-pool entry point.
 
     The file is written beside its destination and renamed onto it, so a file
@@ -285,16 +302,30 @@ def localize_to_file(event: Event, network: Network, output_dir: Path) -> int:
     event
         Simulated event.
     network
-        Network geometry, sampling and prior.
+        Network geometry and sampling.
     output_dir
         Run directory.
+    min_distance, max_distance
+        Distance-prior bounds in Mpc.
+    distance_power, cosmology
+        Prior power and whether to apply BAYESTAR's cosmological correction.
+    rescale_loglikelihood
+        BAYESTAR log-likelihood scale factor.
 
     Returns
     -------
     int
         The event id.
     """
-    skymap = localize_event(event, network)
+    skymap = localize_event(
+        event,
+        network,
+        min_distance=min_distance,
+        max_distance=max_distance,
+        distance_power=distance_power,
+        cosmology=cosmology,
+        rescale_loglikelihood=rescale_loglikelihood,
+    )
     target = skymap_path(output_dir, event.row_index)
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(f".{target.name}.{os.getpid()}.partial.fits")

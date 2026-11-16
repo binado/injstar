@@ -14,8 +14,12 @@ def summarise(output_dir: RunDirectoryArgument) -> None:
     """Rebuild the summary table from a run's sky maps."""
 
     def stage() -> None:
-        from injstar import pipeline
+        from injstar import products
+        from injstar.config._common import RunDirectoryError
 
-        typer.echo(pipeline.summarise(output_dir))
+        if not (output_dir / "injections.h5").is_file():
+            raise RunDirectoryError(f"{output_dir} has no injections.h5")
+
+        typer.echo(products.build_summary(output_dir))
 
     _guarded(stage)
