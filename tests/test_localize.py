@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import lal
@@ -13,14 +14,10 @@ def test_localize_event_rejects_a_short_series(
     event_and_network: tuple[Event, Network],
 ) -> None:
     event, network = event_and_network
-    short = Event(
-        event.row_index,
-        event.coa_time,
-        event.series[:, 180:225],
-        event.epochs + 180 / network.sampling_frequency,
-        event.snr,
-        event.bandwidth,
-        event.horizon,
+    short = replace(
+        event,
+        series=event.series[:, 180:225],
+        epochs=event.epochs + 180 / network.sampling_frequency,
     )
 
     with pytest.raises(ValueError, match="BAYESTAR needs"):
@@ -29,10 +26,8 @@ def test_localize_event_rejects_a_short_series(
 
 @pytest.mark.slow
 def test_zero_noise_map_contains_the_truth(
-    event_and_network: tuple[Event, Network], tmp_path: Path
+    event_and_network: tuple[Event, Network],
 ) -> None:
-    from ligo.skymap.io import fits
-
     event, network = event_and_network
 
     skymap = localize_event(event, network, max_distance=5000.0)
@@ -41,17 +36,19 @@ def test_zero_noise_map_contains_the_truth(
     assert set(skymap.colnames) == {
         "UNIQ", "PROBDENSITY", "DISTMU", "DISTSIGMA", "DISTNORM",
     }  # fmt: skip
-    path = tmp_path / "map.multiorder.fits"
-    fits.write_sky_map(str(path), skymap, moc=True)
     statistics = map_statistics(
-        path, right_ascension=1.2, declination=-0.4, distance=1500.0
+        skymap,
+        row_index=event.row_index,
+        right_ascension=1.2,
+        declination=-0.4,
+        distance=1500.0,
     )
     # Without noise the truth sits at the peak of the likelihood.
-    assert statistics["searched_prob"] < 0.5
-    assert statistics["searched_area"] < statistics["area_90"]
-    assert statistics["distance_q05"] < 1500.0 < statistics["distance_q95"]
-    assert 0.0 <= statistics["distance_lost_prob"] < 0.05
-    assert statistics["log_bsn"] > 100
+    assert statistics.searched_prob < 0.5
+    assert statistics.searched_area < statistics.area_90
+    assert statistics.distance_q05 < 1500.0 < statistics.distance_q95
+    assert 0.0 <= statistics.distance_lost_prob < 0.05
+    assert statistics.log_bsn > 100
 
 
 def test_zero_noise_posterior_prefers_the_true_inclination(
@@ -105,3 +102,37 @@ def test_zero_noise_posterior_prefers_the_true_inclination(
         )
 
     assert log_posterior(0.5) > log_posterior(np.pi - 0.5)
+
+
+@pytest.mark.parametrize("failure", ["statistics", "serialization"])
+def test_failed_summary_does_not_publish_map(
+    event_and_network: tuple[Event, Network],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    from unittest.mock import Mock
+
+    from astropy.table import Table
+
+    from injstar.io import skymap_path
+    from injstar.localize import localize_to_file
+    from injstar.products import LocalizationSummary
+
+    event, network = event_and_network
+    skymap = Table(
+        {"UNIQ": np.arange(4, 16), "PROBDENSITY": np.full(12, 1 / (4 * np.pi))}
+    )
+    monkeypatch.setattr("injstar.localize.localize_event", Mock(return_value=skymap))
+    summary = Mock(spec=LocalizationSummary)
+    summary.dump_fits.side_effect = ValueError("failed summary")
+    statistics = Mock(return_value=summary)
+    if failure == "statistics":
+        statistics.side_effect = ValueError("failed summary")
+    monkeypatch.setattr("injstar.localize.map_statistics", statistics)
+
+    with pytest.raises(ValueError, match="failed summary"):
+        localize_to_file(event, network, tmp_path, max_distance=5000.0)
+
+    assert not skymap_path(tmp_path, event.row_index).exists()
+    assert not list(tmp_path.rglob("*.partial.fits"))

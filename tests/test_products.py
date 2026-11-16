@@ -1,8 +1,15 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 from ligo.skymap import distance
 
-from injstar.products import DISTANCE_QUANTILES, _distance_statistics, statistic_names
+from injstar.products import (
+    DISTANCE_QUANTILES,
+    LocalizationSummary,
+    _distance_statistics,
+    statistic_names,
+)
 
 from .tolerances import assert_close
 
@@ -100,8 +107,23 @@ def test_distance_statistics_with_every_pixel_failed_are_nan() -> None:
 def test_summary_columns_include_the_lost_probability() -> None:
     names = statistic_names()
 
-    assert "distance_lost_prob" in names
-    assert names.index("distance_lost_prob") > names.index("distance_q95")
+    assert names == (
+        "area_50",
+        "area_90",
+        "searched_area",
+        "searched_prob",
+        "searched_prob_dist",
+        "searched_prob_vol",
+        "offset",
+        "distance_q05",
+        "distance_q50",
+        "distance_q95",
+        "distance_lost_prob",
+        "distmean",
+        "diststd",
+        "log_bci",
+        "log_bsn",
+    )
 
 
 def test_distance_statistics_lost_probability_is_never_negative(
@@ -113,3 +135,113 @@ def test_distance_statistics_lost_probability_is_never_negative(
     lost, _ = _statistics(crowded)
 
     assert lost >= 0.0
+
+
+@pytest.fixture
+def summary() -> LocalizationSummary:
+    return LocalizationSummary(
+        row_index=10,
+        area_50=1.0,
+        area_90=2.0,
+        searched_area=0.5,
+        searched_prob=0.2,
+        searched_prob_dist=0.3,
+        searched_prob_vol=0.4,
+        offset=0.1,
+        distance_q05=400.0,
+        distance_q50=600.0,
+        distance_q95=800.0,
+        distance_lost_prob=0.0,
+        distmean=600.0,
+        diststd=50.0,
+        log_bci=np.nan,
+        log_bsn=100.0,
+    )
+
+
+@pytest.fixture
+def map_file(tmp_path: Path) -> Path:
+    from astropy.table import Table
+    from ligo.skymap.io import write_sky_map
+
+    path = tmp_path / "map.fits"
+    skymap = Table(
+        {"UNIQ": np.arange(4, 16), "PROBDENSITY": np.full(12, 1 / (4 * np.pi))}
+    )
+    write_sky_map(str(path), skymap, moc=True)
+    return path
+
+
+def test_summary_fits_roundtrip_and_replacement(
+    map_file: Path, summary: LocalizationSummary
+) -> None:
+    from dataclasses import asdict, replace
+
+    from astropy.io import fits
+    from ligo.skymap.io import read_sky_map
+
+    before = read_sky_map(str(map_file), moc=True, hdu=1)
+    for value in (summary, replace(summary, row_index=2, area_90=3.0)):
+        value.dump_fits(map_file)
+        actual = LocalizationSummary.from_fits(map_file)
+        np.testing.assert_equal(
+            list(asdict(actual).values()), list(asdict(value).values())
+        )
+        with fits.open(map_file) as hdus:
+            assert len(hdus) == 3
+            assert hdus[2].name == "SUMMARY"
+            assert hdus[2].columns.formats == ["K", *(["D"] * len(statistic_names()))]
+        after = read_sky_map(str(map_file), moc=True, hdu=1)
+        assert after.meta == before.meta
+        for name in before.colnames:
+            np.testing.assert_array_equal(after[name], before[name])
+
+
+def test_missing_summary_fails_clearly(map_file: Path) -> None:
+    with pytest.raises(ValueError, match="has no SUMMARY extension"):
+        LocalizationSummary.from_fits(map_file)
+
+
+def test_collect_stored_summaries(
+    tmp_path: Path, map_file: Path, summary: LocalizationSummary
+) -> None:
+    import csv
+    import shutil
+    from dataclasses import asdict, replace
+
+    from injstar.io import skymap_path
+    from injstar.products import build_summary
+
+    values = [summary, replace(summary, row_index=2, area_90=4.0)]
+    for value in values:
+        path = skymap_path(tmp_path, value.row_index)
+        path.parent.mkdir(exist_ok=True)
+        shutil.copyfile(map_file, path)
+        value.dump_fits(path)
+    # Incomplete worker files never contribute a row.
+    (path.parent / ".3.multiorder.fits.123.partial.fits").write_text("incomplete")
+    target = build_summary(tmp_path)
+    assert target == tmp_path / "summary.csv"
+    with target.open(newline="") as stream:
+        reader = csv.DictReader(stream)
+        assert reader.fieldnames == ["row_index", *statistic_names()]
+        rows = list(reader)
+    assert [int(row["row_index"]) for row in rows] == [2, 10]
+    for row, value in zip(rows, reversed(values), strict=True):
+        np.testing.assert_equal(
+            [float(item) for item in row.values()], list(asdict(value).values())
+        )
+        assert row["log_bci"] == "nan"
+
+
+def test_collect_rejects_a_map_without_summary(tmp_path: Path, map_file: Path) -> None:
+    import shutil
+
+    from injstar.io import skymap_path
+    from injstar.products import build_summary
+
+    path = skymap_path(tmp_path, 0)
+    path.parent.mkdir()
+    shutil.copyfile(map_file, path)
+    with pytest.raises(ValueError, match="has no SUMMARY extension"):
+        build_summary(tmp_path)

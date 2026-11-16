@@ -98,7 +98,7 @@ def _run(
     Returns
     -------
     pathlib.Path
-        The ``summary.h5`` of the run directory.
+        The ``summary.csv`` of the run directory.
 
     Raises
     ------
@@ -197,6 +197,9 @@ def _run(
                 batch = [
                     Event(
                         row_index=int(row),
+                        right_ascension=float(columns["right_ascension"][row]),
+                        declination=float(columns["declination"][row]),
+                        distance=float(columns["distance"][row]),
                         coa_time=float(columns["coa_time"][row]),
                         series=np.asarray(drawn.series[index]),
                         epochs=np.asarray(drawn.epochs[index]),

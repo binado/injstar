@@ -1,3 +1,4 @@
+import csv
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from injstar.config import InjectConfig, load_inject_config
 from injstar.config.inject import Inputs
 from injstar.dataset import InjectionResult
 from injstar.localize import Event, Network
+from injstar.products import LocalizationSummary, build_summary, statistic_names
 
 runner = CliRunner()
 
@@ -139,7 +141,7 @@ def test_invalid_config_reports_an_error(config_file: Path) -> None:
 
 
 @pytest.mark.slow
-def test_localize_resume_and_summarise(
+def test_localize_resume_and_summary(
     config_file: Path, population_csv: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lines = population_csv.read_text().splitlines()
@@ -171,13 +173,15 @@ def test_localize_resume_and_summarise(
     out = config_file.parent / "localized"
     maps = sorted(path.name for path in (out / "skymaps").iterdir())
     assert maps == ["0.multiorder.fits", "2.multiorder.fits"]
-    first = read_population_catalogue(out / "summary.h5")
-    assert "event_id" not in first
-    np.testing.assert_array_equal(first["label"], [b"b", b"a", b"c"])
-    np.testing.assert_array_equal(first["localized"], [True, False, True])
-    assert np.isnan(first["area_90"][1])
-    assert "skymap" not in first
-    assert np.all(first["area_90"][[0, 2]] > first["area_50"][[0, 2]])
+    first = read_summary(out)
+    assert tuple(first[0]) == ("row_index", *statistic_names())
+    assert [int(row["row_index"]) for row in first] == [0, 2]
+    for row in first:
+        summary = LocalizationSummary.from_fits(
+            out / "skymaps" / f"{row['row_index']}.multiorder.fits"
+        )
+        assert summary.area_90 > summary.area_50
+        assert float(row["area_90"]) == summary.area_90
 
     # A finished directory is not silently redone.
     assert invoke("localize", localize_file)[0] == 1
@@ -185,20 +189,22 @@ def test_localize_resume_and_summarise(
 
     kept = (out / "skymaps" / "0.multiorder.fits").stat().st_mtime_ns
     (out / "skymaps" / "2.multiorder.fits").unlink()
-    (out / "summary.h5").unlink()
+    (out / "summary.csv").unlink()
     code, output = invoke("localize", localize_file, "--resume")
 
     assert code == 0, output
     assert (out / "skymaps" / "0.multiorder.fits").stat().st_mtime_ns == kept
-    resumed = read_population_catalogue(out / "summary.h5")
-    for name, values in first.items():
-        np.testing.assert_array_equal(resumed[name], values)
+    assert read_summary(out) == first
 
-    (out / "summary.h5").unlink()
-    assert invoke("summarise", out)[0] == 0
-    rebuilt = read_population_catalogue(out / "summary.h5")
-    for name, values in first.items():
-        np.testing.assert_array_equal(rebuilt[name], values)
+    kept_maps = {path: path.read_bytes() for path in (out / "skymaps").iterdir()}
+    (out / "summary.csv").unlink()
+    with monkeypatch.context() as resume_patch:
+        resume_patch.setattr("injstar.products.map_statistics", disabled)
+        resume_patch.setattr("concurrent.futures.ProcessPoolExecutor", disabled)
+        code, output = invoke("localize", localize_file, "--resume")
+        assert code == 0, output
+    assert read_summary(out) == first
+    assert all(path.read_bytes() == data for path, data in kept_maps.items())
 
     source = config_file.parent / "out"
     before = {path.name: path.read_bytes() for path in source.iterdir()}
@@ -221,11 +227,9 @@ def test_localize_resume_and_summarise(
     moved.mkdir()
     source.rename(moved / "out")
     out.rename(moved / "localized")
-    (moved / "localized" / "summary.h5").unlink()
-    assert invoke("summarise", moved / "localized")[0] == 0
-    rebuilt = read_population_catalogue(moved / "localized" / "summary.h5")
-    for name, values in first.items():
-        np.testing.assert_array_equal(rebuilt[name], values)
+    (moved / "localized" / "summary.csv").unlink()
+    build_summary(moved / "localized")
+    assert read_summary(moved / "localized") == first
 
 
 @pytest.mark.parametrize(
@@ -290,9 +294,10 @@ def test_localize_without_detections(
     code, output = invoke("localize", localize_file)
     assert code == 0, output
     out = config_file.parent / "localized"
-    columns = read_population_catalogue(out / "summary.h5")
-    assert not np.any(columns["detected"])
-    assert not np.any(columns["localized"])
+    assert read_summary(out) == []
+    assert (out / "summary.csv").read_text().strip() == ",".join(
+        ("row_index", *statistic_names())
+    )
     assert not (out / "skymaps").exists()
     assert (
         InjectionResult.read(
@@ -307,6 +312,11 @@ def test_localize_without_detections(
     assert invoke("localize", localize_file, "--resume")[0] == 1
     assert invoke("localize", localize_file, "--overwrite")[0] == 0
     assert source.stat().st_mtime_ns == written
+
+
+def read_summary(output_dir: Path) -> list[dict[str, str]]:
+    with (output_dir / "summary.csv").open(newline="") as stream:
+        return list(csv.DictReader(stream))
 
 
 def make_localize_file(config_file: Path) -> Path:
@@ -417,6 +427,7 @@ def test_localize_uses_saved_rows_flags_and_sampling(
     assert [event.row_index for event, _ in seen] == [2, 1]
     columns = read_population_catalogue(config_file.parent / "out" / "injections.h5")
     for event, network in seen:
-        assert event.coa_time == columns["coa_time"][event.row_index]
+        for name in ("coa_time", "right_ascension", "declination", "distance"):
+            assert getattr(event, name) == columns[name][event.row_index]
         assert network.sampling_frequency == 8192.0
         np.testing.assert_array_equal(event.series, result.series[event.row_index])

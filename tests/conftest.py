@@ -186,6 +186,9 @@ def event_and_network(
     names, responses, locations = registry.arrays(config.network)
     event = Event(
         row_index=0,
+        right_ascension=float(population["right_ascension"][0]),
+        declination=float(population["declination"][0]),
+        distance=float(population["distance"][0]),
         coa_time=float(population["coa_time"][0]),
         series=np.asarray(drawn.series[0]),
         epochs=np.asarray(drawn.epochs[0]),
