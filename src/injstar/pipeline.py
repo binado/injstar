@@ -2,9 +2,9 @@
 
 :func:`compute_snr` simulates every injection and writes ``injections.h5``.
 :func:`run` adds one BAYESTAR sky map per detected event and the summary.
-Simulation is deterministic per event, so :func:`run` re-draws the SNR series
-of the events it localizes instead of storing them, and an interrupted run is
-finished by calling it again with the same config and ``resume=True``.
+Complete injection results are stored in HDF5 and read in batches for
+localization. An interrupted run is finished by calling it again with the same
+config and ``resume=True``.
 
 A run directory holds ``config.json``, the :class:`~injstar.config.RunConfig`
 that produced it. A directory is only reused when that config matches the
@@ -17,12 +17,12 @@ import json
 import logging
 import multiprocessing
 import shutil
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from gwmock_pop.loaders.file_loader import read_population_catalogue
@@ -32,6 +32,9 @@ from injstar.config import RunConfig
 from injstar.detector.network import DetectorRegistry, load_detector_config
 from injstar.population import Population, read_population, simulation_events
 from injstar.runtime import configure_runtime, set_cpu_threads
+
+if TYPE_CHECKING:
+    from injstar.dataset import InjectionResult
 
 logger = logging.getLogger(__name__)
 
@@ -133,18 +136,30 @@ def _write_config(config: RunConfig) -> None:
     )
 
 
-def _simulator(inputs: Inputs):  # noqa: ANN202 - simulate imports JAX
-    """Build the simulator; JAX is configured and imported here, not earlier."""
+def _simulation_batches(inputs: Inputs) -> Iterator["InjectionResult"]:
+    """Configure JAX and yield results from one prepared simulation kernel."""
     configure_runtime()
-    from injstar.simulate import Simulator, greenwich_sidereal_time
+    from injstar.simulate import _inject_batches, greenwich_sidereal_time
+    from injstar.waveform import waveform
 
+    config = inputs.config.model_copy(
+        update={"network": inputs.registry.members("selected")}
+    )
     events = simulation_events(
         inputs.population, greenwich_sidereal_time(inputs.population["coa_time"])
     )
-    resolved_config = inputs.config.model_copy(
-        update={"network": inputs.registry.members("selected")}
+    return _inject_batches(
+        events,
+        waveform=waveform(
+            config.waveform_approximant, reference_frequency=config.reference_frequency
+        ),
+        template=waveform(
+            config.template_approximant or config.waveform_approximant,
+            reference_frequency=config.reference_frequency,
+        ),
+        network=inputs.registry,
+        config=config,
     )
-    return Simulator.from_config(resolved_config, inputs.registry), events
 
 
 def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
@@ -172,25 +187,42 @@ def compute_snr(config: RunConfig, *, overwrite: bool = False) -> Path:
     inputs = load_inputs(config)
     target = config.output_dir / io.INJECTIONS_FILE
     reused = _prepare_directory(config, overwrite=overwrite)
-    if reused and target.is_file() and (config.output_dir / io.SNR_FILE).is_file():
+    results_path = config.output_dir / io.INJECTION_RESULTS_FILE
+    if reused and target.is_file() and results_path.is_file():
         logger.info("reusing %s", target)
         return target
 
-    simulator, events = _simulator(inputs)
-    result = simulator.snr(events)
-    columns = dict(inputs.population)
-    for index, name in enumerate(simulator.names):
-        columns[f"expected_snr_{name}"] = result.expected_snr[:, index]
-        columns[f"observed_snr_{name}"] = result.observed_snr[:, index]
-        columns[f"horizon_{name}"] = result.horizon[:, index]
-    columns["network_snr"] = result.network_snr
-    columns["detected"] = result.detected
-
     _write_config(config)
-    io.write_table(target, columns)
-    result.write_csv(config.output_dir / io.SNR_FILE)
+    partial_results = results_path.with_suffix(".partial.h5")
+    partial_catalogue = target.with_suffix(".partial.h5")
+    results_path.unlink(missing_ok=True)
+    partial_results.unlink(missing_ok=True)
+    chunks: dict[str, list[np.ndarray]] = {}
+    try:
+        for result in _simulation_batches(inputs):
+            result.write(partial_results, append=True)
+            batch_columns = {}
+            for index, name in enumerate(result.detectors):
+                for field in ("expected_snr", "observed_snr", "horizon"):
+                    batch_columns[f"{field}_{name}"] = np.asarray(
+                        getattr(result, field)
+                    )[:, index]
+            batch_columns["network_snr"] = np.asarray(result.network_snr)
+            batch_columns["detected"] = np.asarray(result.detected)
+            for name, values in batch_columns.items():
+                chunks.setdefault(name, []).append(values)
+        columns = dict(inputs.population)
+        columns.update({name: np.concatenate(parts) for name, parts in chunks.items()})
+        io.write_table(partial_catalogue, columns)
+        partial_catalogue.replace(target)
+        partial_results.replace(results_path)
+    finally:
+        partial_results.unlink(missing_ok=True)
+        partial_catalogue.unlink(missing_ok=True)
     logger.info(
-        "%d of %d injections detected", int(result.detected.sum()), len(result.detected)
+        "%d of %d injections detected",
+        int(columns["detected"].sum()),
+        len(columns["detected"]),
     )
     return target
 
@@ -257,9 +289,9 @@ def run(config: RunConfig, *, overwrite: bool = False, resume: bool = False) -> 
 
     if len(todo):
         # ligo.skymap is imported here so that `injstar snr` never loads it.
+        from injstar.dataset import InjectionResult
         from injstar.localize import Event, Network, localize_to_file
 
-        simulator, events = _simulator(inputs)
         names, responses, locations = inputs.registry.arrays("selected")
         network = Network(
             names=names,
@@ -278,18 +310,18 @@ def run(config: RunConfig, *, overwrite: bool = False, resume: bool = False) -> 
         ) as pool:
             for start in range(0, len(todo), config.batch_size):
                 rows = todo[start : start + config.batch_size]
-                drawn = simulator.series(
-                    {name: values[rows] for name, values in events.items()}, rows=rows
+                drawn = InjectionResult.read(
+                    output_dir / io.INJECTION_RESULTS_FILE, selection=rows
                 )
                 batch = [
                     Event(
                         row_index=int(row),
                         coa_time=float(columns["coa_time"][row]),
-                        series=drawn.series[index],
-                        epochs=drawn.epochs[index],
-                        snr=drawn.scalars.observed_snr[index],
-                        bandwidth=drawn.scalars.bandwidth[index],
-                        horizon=drawn.scalars.horizon[index],
+                        series=np.asarray(drawn.series[index]),
+                        epochs=np.asarray(drawn.epochs[index]),
+                        snr=np.asarray(drawn.observed_snr[index]),
+                        bandwidth=np.asarray(drawn.bandwidth[index]),
+                        horizon=np.asarray(drawn.horizon[index]),
                     )
                     for index, row in enumerate(rows)
                 ]

@@ -5,12 +5,13 @@ import pytest
 from pycbc import filter as pycbc_filter
 from pycbc.types import FrequencySeries
 
+from injstar.dataset import ARRAY_FIELDS
 from injstar.detector.network import DetectorRegistry
 from injstar.population import read_population, simulation_events
-from injstar.simulate import Simulator, greenwich_sidereal_time
+from injstar.simulate import greenwich_sidereal_time
 from injstar.waveform.pycbc import PyCBCWaveformGenerator
 
-from .conftest import PycbcDetector, make_config
+from .conftest import PycbcDetector, inject, make_config
 from .tolerances import assert_close
 
 
@@ -69,7 +70,7 @@ def test_noise_free_series_matches_pycbc(
     )
     event = {field: values[:1] for field, values in events.items()}
     event["coa_phase"] = np.array([0.6])
-    result = Simulator.from_config(config, registry).series(event)
+    result = inject(event, config=config, network=registry)
 
     source = {field: float(values[0]) for field, values in event.items()}
     bins = slice(40, 801)
@@ -116,12 +117,12 @@ def test_noise_free_series_matches_pycbc(
 
         assert result.epochs[0, index] == (start - midpoint) / rate
         assert_close(result.series[0, index] / peak, crop / peak)
-        assert_close(result.scalars.observed_snr[0, index], peak)
+        assert_close(result.observed_snr[0, index], peak)
         # The optimal SNR and horizon use waveform norms.
         assert_close(
             [
-                result.scalars.expected_snr[0, index],
-                result.scalars.horizon[0, index],
+                result.expected_snr[0, index],
+                result.horizon[0, index],
             ],
             [pycbc_filter.sigma(d, **kwargs), pycbc_filter.sigma(h, **kwargs)],
         )
@@ -131,12 +132,12 @@ def test_noise_has_unit_variance_per_quadrature(
     tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
 ) -> None:
     many = repeat(events, 0, 400)
-    clean = Simulator.from_config(make_config(tmp_path, noise=False), registry).series(
-        repeat(events, 0, 1)
+    clean = inject(
+        repeat(events, 0, 1),
+        config=make_config(tmp_path, noise=False),
+        network=registry,
     )
-    noisy = Simulator.from_config(
-        make_config(tmp_path, batch_size=100), registry
-    ).series(many)
+    noisy = inject(many, config=make_config(tmp_path, batch_size=100), network=registry)
 
     residual = noisy.series - clean.series[0]
     centre = residual.shape[-1] // 2
@@ -154,24 +155,25 @@ def test_results_do_not_depend_on_batching_or_order(
 ) -> None:
     many = repeat(events, 0, 7)
     order = np.array([3, 0, 6, 1, 5, 2, 4])
-    reference = Simulator.from_config(
-        make_config(tmp_path, batch_size=7), registry
-    ).series(many)
-    shuffled = Simulator.from_config(
-        make_config(tmp_path, batch_size=3), registry
-    ).series({name: values[order] for name, values in many.items()}, rows=order)
-
-    assert_close(shuffled.series, reference.series[order])
-    np.testing.assert_array_equal(
-        shuffled.scalars.detected, reference.scalars.detected[order]
+    reference = inject(
+        many, config=make_config(tmp_path, batch_size=7), network=registry
     )
+    shuffled = inject(
+        {name: values[order] for name, values in many.items()},
+        config=make_config(tmp_path, batch_size=3),
+        network=registry,
+        rows=order,
+    )
+
+    for name in ARRAY_FIELDS:
+        assert_close(getattr(shuffled, name), getattr(reference, name)[order])
 
 
 def test_seed_changes_the_noise(
     tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
 ) -> None:
-    first = Simulator.from_config(make_config(tmp_path, seed=1), registry).snr(events)
-    second = Simulator.from_config(make_config(tmp_path, seed=2), registry).snr(events)
+    first = inject(events, config=make_config(tmp_path, seed=1), network=registry)
+    second = inject(events, config=make_config(tmp_path, seed=2), network=registry)
 
     assert not np.allclose(first.observed_snr, second.observed_snr)
     np.testing.assert_array_equal(first.expected_snr, second.expected_snr)
@@ -180,7 +182,7 @@ def test_seed_changes_the_noise(
 def test_detection_rule(
     tmp_path: Path, registry: DetectorRegistry, events: dict[str, np.ndarray]
 ) -> None:
-    result = Simulator.from_config(make_config(tmp_path), registry).snr(events)
+    result = inject(events, config=make_config(tmp_path), network=registry)
 
     # Loud, far too distant, and a nearby binary neutron star.
     np.testing.assert_array_equal(result.detected, [True, False, True])
@@ -198,7 +200,7 @@ def test_tidal_model_gives_finite_positive_horizons(
 ) -> None:
     config = make_config(tmp_path, noise=False, waveform_approximant=approximant)
 
-    horizon = Simulator.from_config(config, registry).snr(tidal_events).horizon
+    horizon = inject(tidal_events, config=config, network=registry).horizon
 
     # The last row is the binary neutron star.
     assert np.all(np.isfinite(horizon[2]))
@@ -211,27 +213,11 @@ def test_tidal_deformability_reaches_a_tidal_model(
     events: dict[str, np.ndarray],
     tidal_events: dict[str, np.ndarray],
 ) -> None:
-    simulator = Simulator.from_config(
-        make_config(tmp_path, noise=False, waveform_approximant="TaylorF2"), registry
-    )
-
-    undeformed = simulator.snr(events).horizon[2]
-    deformed = simulator.snr(tidal_events).horizon[2]
+    config = make_config(tmp_path, noise=False, waveform_approximant="TaylorF2")
+    undeformed = inject(events, config=config, network=registry).horizon[2]
+    deformed = inject(tidal_events, config=config, network=registry).horizon[2]
 
     assert not np.array_equal(undeformed, deformed)
-
-
-def test_event_fields_follow_the_waveform(
-    tmp_path: Path, registry: DetectorRegistry
-) -> None:
-    aligned = Simulator.from_config(make_config(tmp_path), registry)
-    tidal = Simulator.from_config(
-        make_config(tmp_path, waveform_approximant="TaylorF2"), registry
-    )
-
-    assert "lambda_1" not in aligned.event_fields
-    assert "lambda_1" in tidal.event_fields
-    assert len(set(tidal.event_fields)) == len(tidal.event_fields)
 
 
 @pytest.mark.parametrize("signal", ["IMRPhenomXHM", "IMRPhenomXPHM"])
@@ -248,7 +234,7 @@ def test_higher_mode_signal_never_exceeds_its_optimal_snr(
         template_approximant="IMRPhenomXAS",
     )
 
-    result = Simulator.from_config(config, registry).snr(events)
+    result = inject(events, config=config, network=registry)
 
     assert np.all(np.isfinite(result.expected_snr))
     assert np.all(np.isfinite(result.observed_snr))
@@ -257,10 +243,14 @@ def test_higher_mode_signal_never_exceeds_its_optimal_snr(
     assert_close(result.observed_snr, result.expected_snr, rtol=0.05)
 
 
-def test_from_config_rejects_a_higher_mode_template(
-    tmp_path: Path, registry: DetectorRegistry
+@pytest.mark.parametrize("approximant", ["IMRPhenomXHM", "IMRPhenomXPHM"])
+def test_rejects_an_unsupported_template(
+    tmp_path: Path,
+    registry: DetectorRegistry,
+    events: dict[str, np.ndarray],
+    approximant: str,
 ) -> None:
-    config = make_config(tmp_path, waveform_approximant="IMRPhenomXHM")
+    config = make_config(tmp_path, waveform_approximant=approximant)
 
     with pytest.raises(ValueError, match="template_approximant"):
-        Simulator.from_config(config, registry)
+        inject(events, config=config, network=registry)

@@ -54,13 +54,20 @@ The output directory holds:
 
 | File | Contents |
 | --- | --- |
-| `snr.csv` | One row per injection: original row index, per-detector SNRs, horizons and bandwidths, network SNR and detection flag. |
+| `injection_results.h5` | Complete batched results for every injection: SNRs, horizons, bandwidths, complex series, epochs and original population row indices; detector order and sampling frequency are shared attributes. |
 | `injections.h5` | One row per injection: truth, expected and observed SNR per detector, network SNR, `detected`. |
 | `skymaps/<row_index>.multiorder.fits` | BAYESTAR sky map of each detected event. |
 | `summary.h5` | `injections.h5` plus 50% and 90% areas, searched area and probability, distance quantiles, `log_bci`, `log_bsn`. |
 | `config.json` | The run config as validated, with paths made absolute. |
 
-The HDF5 tables use gwmock-pop’s structured `data` dataset. Text columns are
+Results are chunked and uncompressed. The complex128 series alone uses
+`16 × injections × detectors × crop_samples` bytes. Simulation and localization
+stream series in batches of `batch_size`; localization reuses the stored series.
+Both HDF5 injection products must exist to reuse the simulation stage. Older
+runs containing only `snr.csv` are recomputed.
+
+The `injections.h5` and `summary.h5` catalogues use gwmock-pop’s structured
+`data` dataset. Text columns are
 stored as UTF-8 bytes. Run directories created with the previous table layout
 must be regenerated before resuming or summarising.
 
