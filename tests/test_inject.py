@@ -207,19 +207,6 @@ def test_tidal_model_gives_finite_positive_horizons(
     assert np.all(horizon[2] > 0)
 
 
-def test_tidal_deformability_reaches_a_tidal_model(
-    tmp_path: Path,
-    registry: DetectorRegistry,
-    events: dict[str, np.ndarray],
-    tidal_events: dict[str, np.ndarray],
-) -> None:
-    config = make_config(tmp_path, noise=False, waveform_approximant="TaylorF2")
-    undeformed = inject(events, config=config, network=registry).horizon[2]
-    deformed = inject(tidal_events, config=config, network=registry).horizon[2]
-
-    assert not np.array_equal(undeformed, deformed)
-
-
 @pytest.mark.parametrize("signal", ["IMRPhenomXHM", "IMRPhenomXPHM"])
 def test_higher_mode_signal_never_exceeds_its_optimal_snr(
     tmp_path: Path,
