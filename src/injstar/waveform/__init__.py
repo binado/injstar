@@ -47,9 +47,6 @@ class WaveformGenerator[ArrayT](Protocol):
         ...
 
 
-#: Canonical population columns the models read, by the name ripple gives them.
-#: The two detector-frame masses are not listed: they enter as the chirp mass
-#: and symmetric mass ratio.
 _RIPPLE_NAMES = {
     "spin_1x": "s1_x",
     "spin_1y": "s1_y",

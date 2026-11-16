@@ -13,7 +13,6 @@ import polars as pl
 from gwmock_pop.loaders.file_loader import infer_population_file_format
 from numpy.typing import NDArray
 
-#: Columns the pipeline uses, in output order.
 CANONICAL_COLUMNS = (
     "detector_frame_mass_1",
     "detector_frame_mass_2",
@@ -34,7 +33,6 @@ CANONICAL_COLUMNS = (
     "coa_time",
 )
 
-#: Columns that default to zero when the population lacks them.
 _ZERO_DEFAULTS = (
     "spin_1x",
     "spin_1y",

@@ -93,7 +93,6 @@ def test_user_layer_adds_detector_and_network(tmp_path: Path) -> None:
 
     assert registry.members("mine") == ("X1", "H1")
     assert registry.detectors["H1"].psd_reference == "kagra_128Mpc_psd.txt"
-    # The packaged H1 geometry survives the override of its PSD.
     assert registry.detectors["H1"].geometry.elevation_m == pytest.approx(142.554)
     frequencies = np.array([1.0, 30.0, 100.0, 1e6])
     assert_close(

@@ -32,11 +32,22 @@ def test_module_imports(name: str) -> None:
     assert module.__doc__
 
 
-@pytest.mark.parametrize("name", ["cli", "detector"])
-def test_import_stays_light(name: str) -> None:
+@pytest.mark.parametrize(
+    ("name", "forbidden"),
+    [
+        ("cli", {"astropy", "jax", "ligo.skymap", "pydantic"}),
+        ("config", {"astropy", "jax", "ligo.skymap"}),
+        ("detector", {"astropy", "jax", "ligo.skymap"}),
+        ("detector.network", {"astropy", "jax", "ligo.skymap"}),
+        ("detector.psd", {"astropy", "jax", "ligo.skymap"}),
+        ("localize", {"jax"}),
+        ("products", {"astropy", "jax", "ligo.skymap"}),
+    ],
+)
+def test_import_stays_light(name: str, forbidden: set[str]) -> None:
     code = (
         f"import sys, injstar.{name}; "
-        "heavy = {'jax', 'ligo.skymap', 'astropy'} & set(sys.modules); "
+        f"heavy = {forbidden!r} & set(sys.modules); "
         "sys.exit(1 if heavy else 0)"
     )
 

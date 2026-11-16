@@ -64,8 +64,6 @@ from injstar.detector.network import DetectorRegistry
 from injstar.detector.noise import simulate_fd_noise
 from injstar.waveform import WaveformGenerator
 
-#: Per-event inputs that do not depend on the waveform models, each an array over
-#: events.
 EXTRINSIC_FIELDS = (
     "right_ascension",
     "declination",
@@ -73,7 +71,6 @@ EXTRINSIC_FIELDS = (
     "gmst",
 )
 
-#: The template is the waveform seen face-on, at 1 Mpc and zero phase.
 _FACE_ON = {"distance": 1.0, "inclination": 0.0, "coa_phase": 0.0}
 
 
@@ -159,7 +156,6 @@ def _prepare_kernel(
     ) -> dict[str, jax.Array]:
         n, df, rate = n_samples, delta_f, sampling_frequency
 
-        # The template: the face-on plus polarization at 1 Mpc.
         template, _ = template_generator(
             frequencies,
             {name: event[name] for name in template_generator.parameter_names}
@@ -193,8 +189,6 @@ def _prepare_kernel(
             )
         )(jnp.asarray(locations))
 
-        # The signal: the full projected strain, with the geocentric time on
-        # sample n // 2 of the periodic segment.
         plus, cross = waveform(
             frequencies,
             {name: event[name] for name in waveform.parameter_names},
@@ -206,7 +200,6 @@ def _prepare_kernel(
         )
         expected = matched_filter.optimal_snr(data, inverse_psd=inverse_psd, delta_f=df)
         if noise:
-            # The key depends only on the root key and the 64-bit row index.
             high = (row >> 32).astype(jnp.uint32)
             low = (row & 0xFFFFFFFF).astype(jnp.uint32)
             key = jax.random.fold_in(jax.random.fold_in(root, high), low)
