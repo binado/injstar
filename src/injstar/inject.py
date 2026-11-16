@@ -61,6 +61,7 @@ from injstar import matched_filter
 from injstar.dataset import ARRAY_FIELDS, InjectionResult
 from injstar.detector import projection
 from injstar.detector.network import DetectorRegistry
+from injstar.detector.noise import simulate_fd_noise
 from injstar.waveform import WaveformGenerator
 
 #: Per-event inputs that do not depend on the waveform models, each an array over
@@ -94,20 +95,6 @@ def greenwich_sidereal_time(gps_times: NDArray[np.float64]) -> NDArray[np.float6
         [lal.GreenwichMeanSiderealTime(lal.LIGOTimeGPS(float(t))) for t in gps_times],
         dtype=float,
     )
-
-
-def _noise_spectrum(
-    white: jax.Array, *, inverse_psd: jax.Array, delta_f: float
-) -> jax.Array:
-    """Frequency-domain Gaussian noise with one-sided PSD ``1 / inverse_psd``.
-
-    ``white`` has independent standard normal real and imaginary parts. Bins
-    without a PSD (``inverse_psd == 0``) carry no noise.
-    """
-    psd = jnp.where(
-        inverse_psd > 0, 1.0 / jnp.where(inverse_psd > 0, inverse_psd, 1.0), 0.0
-    )
-    return jnp.sqrt(psd / (4 * delta_f)) * white
 
 
 def _prepare_kernel(
@@ -223,10 +210,7 @@ def _prepare_kernel(
             high = (row >> 32).astype(jnp.uint32)
             low = (row & 0xFFFFFFFF).astype(jnp.uint32)
             key = jax.random.fold_in(jax.random.fold_in(root, high), low)
-            draw = jax.random.normal(key, (*inverse_psd.shape, 2))
-            data = data + _noise_spectrum(
-                draw[..., 0] + 1j * draw[..., 1], inverse_psd=inverse_psd, delta_f=df
-            )
+            data = data + simulate_fd_noise(key, inverse_psd=inverse_psd, delta_f=df)
         series = matched_filter.matched_filter_snr_series(
             data,
             unit_template,

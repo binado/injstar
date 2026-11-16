@@ -11,6 +11,7 @@ MODULES = [
     "localize",
     "detector",
     "detector.network",
+    "detector.noise",
     "detector.projection",
     "detector.psd",
     "config.inject",
@@ -31,9 +32,10 @@ def test_module_imports(name: str) -> None:
     assert module.__doc__
 
 
-def test_cli_import_stays_light() -> None:
+@pytest.mark.parametrize("name", ["cli", "detector"])
+def test_import_stays_light(name: str) -> None:
     code = (
-        "import sys, injstar.cli; "
+        f"import sys, injstar.{name}; "
         "heavy = {'jax', 'ligo.skymap', 'astropy'} & set(sys.modules); "
         "sys.exit(1 if heavy else 0)"
     )

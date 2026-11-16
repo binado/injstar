@@ -1,6 +1,6 @@
-"""Detector-specific code: network specification, noise spectra and projection.
+"""Detector networks, noise spectra, noise simulation and projection.
 
 :mod:`injstar.detector.network` and :mod:`injstar.detector.psd` are JAX-free;
-:mod:`injstar.detector.projection` needs JAX. None is imported here, so
-importing the package stays light.
+:mod:`injstar.detector.noise` and :mod:`injstar.detector.projection` need JAX.
+None is imported here, so importing the package stays light.
 """
