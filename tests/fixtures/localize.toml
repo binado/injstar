@@ -1,0 +1,8 @@
+# Localize the saved reference injections.
+network = "reference"
+detector_config = ["detectors.toml"]
+injection_dir = "injected"
+output_dir = "localized"
+
+[prior]
+max_distance = 5000.0

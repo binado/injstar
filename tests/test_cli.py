@@ -1,4 +1,6 @@
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -6,8 +8,10 @@ from gwmock_pop.loaders.file_loader import read_population_catalogue
 from typer.testing import CliRunner
 
 from injstar.cli import app
-from injstar.config import RunConfig, load_run_config
+from injstar.config import InjectConfig, load_inject_config
+from injstar.config.inject import Inputs
 from injstar.dataset import InjectionResult
+from injstar.localize import Event, Network
 
 runner = CliRunner()
 
@@ -31,11 +35,11 @@ def use_named_network(config_file: Path) -> None:
 def test_named_network_matches_explicit_detectors(config_file: Path) -> None:
     explicit = config_file.parent / "explicit"
     named = config_file.parent / "named"
-    code, output = invoke("snr", config_file, "--output-dir", explicit)
+    code, output = invoke("inject", config_file, "--output-dir", explicit)
     assert code == 0, output
 
     use_named_network(config_file)
-    code, output = invoke("snr", config_file, "--output-dir", named)
+    code, output = invoke("inject", config_file, "--output-dir", named)
     assert code == 0, output
 
     expected = read_population_catalogue(explicit / "injections.h5")
@@ -45,8 +49,8 @@ def test_named_network_matches_explicit_detectors(config_file: Path) -> None:
         np.testing.assert_array_equal(actual[name], values)
 
 
-def test_snr_writes_injections_and_no_maps(config_file: Path) -> None:
-    code, output = invoke("snr", config_file)
+def test_inject_writes_injections_and_no_maps(config_file: Path) -> None:
+    code, output = invoke("inject", config_file)
 
     assert code == 0, output
     assert "2 of 3 injections detected" in output
@@ -64,19 +68,19 @@ def test_snr_writes_injections_and_no_maps(config_file: Path) -> None:
     assert "event_id" not in columns
 
 
-def test_snr_records_the_config_it_ran(config_file: Path) -> None:
-    invoke("snr", config_file)
+def test_inject_records_the_config_it_ran(config_file: Path) -> None:
+    invoke("inject", config_file)
 
-    recorded = RunConfig.model_validate_json(
+    recorded = InjectConfig.model_validate_json(
         (config_file.parent / "out" / "config.json").read_text()
     )
-    assert recorded == load_run_config(config_file)
+    assert recorded == load_inject_config(config_file)
 
 
-def test_snr_ignores_snr_columns_in_the_population(
+def test_inject_ignores_snr_columns_in_the_population(
     config_file: Path, population_csv: Path, tmp_path: Path
 ) -> None:
-    invoke("snr", config_file, "--output-dir", tmp_path / "plain")
+    invoke("inject", config_file, "--output-dir", tmp_path / "plain")
     lines = population_csv.read_text().splitlines()
     population_csv.write_text(
         "\n".join(
@@ -84,7 +88,7 @@ def test_snr_ignores_snr_columns_in_the_population(
         )
         + "\n"
     )
-    code, output = invoke("snr", config_file, "--output-dir", tmp_path / "bogus")
+    code, output = invoke("inject", config_file, "--output-dir", tmp_path / "bogus")
 
     assert code == 0, output
     plain = read_population_catalogue(tmp_path / "plain" / "injections.h5")
@@ -95,21 +99,21 @@ def test_snr_ignores_snr_columns_in_the_population(
         np.testing.assert_array_equal(bogus[name], values)
 
 
-def test_snr_reuses_a_matching_directory_and_refuses_another(
+def test_inject_reuses_a_matching_directory_and_refuses_another(
     config_file: Path,
 ) -> None:
-    invoke("snr", config_file)
+    invoke("inject", config_file)
     target = config_file.parent / "out" / "injections.h5"
     written = target.stat().st_mtime_ns
 
-    assert invoke("snr", config_file)[0] == 0
+    assert invoke("inject", config_file)[0] == 0
     assert target.stat().st_mtime_ns == written
 
-    code, output = invoke("snr", config_file, "--seed", 5)
+    code, output = invoke("inject", config_file, "--seed", 5)
     assert code == 1
     assert "different config" in output
 
-    assert invoke("snr", config_file, "--seed", 5, "--overwrite")[0] == 0
+    assert invoke("inject", config_file, "--seed", 5, "--overwrite")[0] == 0
     assert target.stat().st_mtime_ns != written
 
 
@@ -118,7 +122,7 @@ def test_foreign_directory_is_never_deleted(config_file: Path) -> None:
     out.mkdir()
     (out / "thesis.tex").write_text("precious")
 
-    code, output = invoke("snr", config_file, "--overwrite")
+    code, output = invoke("inject", config_file, "--overwrite")
 
     assert code == 1
     assert "refusing to delete" in output
@@ -126,16 +130,16 @@ def test_foreign_directory_is_never_deleted(config_file: Path) -> None:
 
 
 def test_invalid_config_reports_an_error(config_file: Path) -> None:
-    config_file.write_text(config_file.read_text().replace("5000.0", "-1.0"))
+    config_file.write_text(config_file.read_text() + "\nminimum_frequency = -1.0\n")
 
-    code, output = invoke("snr", config_file)
+    code, output = invoke("inject", config_file)
 
     assert code == 1
-    assert "max_distance" in output
+    assert "minimum_frequency" in output
 
 
 @pytest.mark.slow
-def test_run_resume_and_summarise(
+def test_localize_resume_and_summarise(
     config_file: Path, population_csv: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lines = population_csv.read_text().splitlines()
@@ -152,17 +156,19 @@ def test_run_resume_and_summarise(
         + "\n"
     )
     out = config_file.parent / "out"
-    assert invoke("snr", config_file)[0] == 0
+    assert invoke("inject", config_file)[0] == 0
 
     def disabled(*args: object, **kwargs: object) -> None:
         pytest.fail("localization must reuse stored injection results")
 
-    monkeypatch.setattr("injstar.pipeline._simulation_batches", disabled)
-    monkeypatch.setattr("injstar.simulate.inject_events", disabled)
+    monkeypatch.setattr("injstar.config.inject._simulation_batches", disabled)
+    monkeypatch.setattr("injstar.inject.inject_events", disabled)
     monkeypatch.setattr("injstar.waveform.waveform", disabled)
-    code, output = invoke("run", config_file, "--workers", 2)
+    localize_file = make_localize_file(config_file)
+    code, output = invoke("localize", localize_file, "--workers", 2)
 
     assert code == 0, output
+    out = config_file.parent / "localized"
     maps = sorted(path.name for path in (out / "skymaps").iterdir())
     assert maps == ["0.multiorder.fits", "2.multiorder.fits"]
     first = read_population_catalogue(out / "summary.h5")
@@ -174,13 +180,13 @@ def test_run_resume_and_summarise(
     assert np.all(first["area_90"][[0, 2]] > first["area_50"][[0, 2]])
 
     # A finished directory is not silently redone.
-    assert invoke("run", config_file)[0] == 1
-    assert invoke("run", config_file, "--resume", "--overwrite")[0] == 1
+    assert invoke("localize", localize_file)[0] == 1
+    assert invoke("localize", localize_file, "--resume", "--overwrite")[0] == 1
 
     kept = (out / "skymaps" / "0.multiorder.fits").stat().st_mtime_ns
     (out / "skymaps" / "2.multiorder.fits").unlink()
     (out / "summary.h5").unlink()
-    code, output = invoke("run", config_file, "--resume")
+    code, output = invoke("localize", localize_file, "--resume")
 
     assert code == 0, output
     assert (out / "skymaps" / "0.multiorder.fits").stat().st_mtime_ns == kept
@@ -191,6 +197,33 @@ def test_run_resume_and_summarise(
     (out / "summary.h5").unlink()
     assert invoke("summarise", out)[0] == 0
     rebuilt = read_population_catalogue(out / "summary.h5")
+    for name, values in first.items():
+        np.testing.assert_array_equal(rebuilt[name], values)
+
+    source = config_file.parent / "out"
+    before = {path.name: path.read_bytes() for path in source.iterdir()}
+    second_file = config_file.parent / "second.toml"
+    second_file.write_text(
+        localize_file.read_text()
+        .replace('"localized"', '"second"')
+        .replace("5000.0", "6000.0")
+    )
+    code, output = invoke("localize", second_file)
+    assert code == 0, output
+    assert {path.name: path.read_bytes() for path in source.iterdir()} == before
+    assert (out / "injections.h5").is_symlink()
+    assert (out / "injections.h5").readlink() == Path("../out/injections.h5")
+    assert (
+        config_file.parent / "second" / "injections.h5"
+    ).resolve() == source / "injections.h5"
+
+    moved = config_file.parent / "moved"
+    moved.mkdir()
+    source.rename(moved / "out")
+    out.rename(moved / "localized")
+    (moved / "localized" / "summary.h5").unlink()
+    assert invoke("summarise", moved / "localized")[0] == 0
+    rebuilt = read_population_catalogue(moved / "localized" / "summary.h5")
     for name, values in first.items():
         np.testing.assert_array_equal(rebuilt[name], values)
 
@@ -205,13 +238,13 @@ def test_generated_column_collision_rejected(
     population_csv.write_text(
         "\n".join([lines[0] + "," + name, *(line + ",1" for line in lines[1:])]) + "\n"
     )
-    code, output = invoke("snr", config_file)
+    code, output = invoke("inject", config_file)
     assert code == 1
     assert name in output
 
 
 def test_partial_batches_are_stored_once(config_file: Path) -> None:
-    code, output = invoke("snr", config_file)
+    code, output = invoke("inject", config_file)
     assert code == 0, output
     out = config_file.parent / "out"
     result = InjectionResult.read(out / "injection_results.h5")
@@ -224,19 +257,19 @@ def test_partial_batches_are_stored_once(config_file: Path) -> None:
 
 @pytest.mark.parametrize("missing", ["injection_results.h5", "injections.h5"])
 def test_incomplete_simulation_is_recomputed(config_file: Path, missing: str) -> None:
-    assert invoke("snr", config_file)[0] == 0
+    assert invoke("inject", config_file)[0] == 0
     out = config_file.parent / "out"
     (out / missing).unlink()
     # A legacy CSV is irrelevant to completion of the simulation stage.
     (out / "snr.csv").write_text("legacy")
-    code, output = invoke("snr", config_file)
+    code, output = invoke("inject", config_file)
     assert code == 0, output
     result = InjectionResult.read(out / "injection_results.h5")
     columns = read_population_catalogue(out / "injections.h5")
     np.testing.assert_array_equal(result.network_snr, columns["network_snr"])
 
 
-def test_run_without_detections(
+def test_localize_without_detections(
     config_file: Path, population_csv: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lines = population_csv.read_text().splitlines()
@@ -251,12 +284,139 @@ def test_run_without_detections(
     def disabled(*args: object, **kwargs: object) -> None:
         pytest.fail("no detections should not start localization")
 
-    monkeypatch.setattr("injstar.pipeline.ProcessPoolExecutor", disabled)
-    code, output = invoke("run", config_file)
+    monkeypatch.setattr("concurrent.futures.ProcessPoolExecutor", disabled)
+    assert invoke("inject", config_file)[0] == 0
+    localize_file = make_localize_file(config_file)
+    code, output = invoke("localize", localize_file)
     assert code == 0, output
-    out = config_file.parent / "out"
+    out = config_file.parent / "localized"
     columns = read_population_catalogue(out / "summary.h5")
     assert not np.any(columns["detected"])
     assert not np.any(columns["localized"])
     assert not (out / "skymaps").exists()
-    assert InjectionResult.read(out / "injection_results.h5").series.shape[0] == 3
+    assert (
+        InjectionResult.read(
+            config_file.parent / "out" / "injection_results.h5"
+        ).series.shape[0]
+        == 3
+    )
+
+    source = config_file.parent / "out" / "injections.h5"
+    written = source.stat().st_mtime_ns
+    localize_file.write_text(localize_file.read_text().replace("5000.0", "6000.0"))
+    assert invoke("localize", localize_file, "--resume")[0] == 1
+    assert invoke("localize", localize_file, "--overwrite")[0] == 0
+    assert source.stat().st_mtime_ns == written
+
+
+def make_localize_file(config_file: Path) -> Path:
+    path = config_file.parent / "localize.toml"
+    path.write_text(
+        'network = ["H1", "L1", "V1"]\n'
+        'injection_dir = "out"\noutput_dir = "localized"\n'
+        "[prior]\nmax_distance = 5000.0\n"
+    )
+    return path
+
+
+@pytest.mark.parametrize(
+    "missing", ["config.json", "injections.h5", "injection_results.h5"]
+)
+def test_localize_requires_completed_injection(config_file: Path, missing: str) -> None:
+    assert invoke("inject", config_file)[0] == 0
+    (config_file.parent / "out" / missing).unlink()
+    code, output = invoke("localize", make_localize_file(config_file))
+    assert code == 1
+    assert f"no completed {missing}" in output
+    assert not (config_file.parent / "localized").exists()
+
+
+def test_localize_rejects_detector_order_before_overwrite(config_file: Path) -> None:
+    assert invoke("inject", config_file)[0] == 0
+    path = make_localize_file(config_file)
+    path.write_text(
+        path.read_text().replace('["H1", "L1", "V1"]', '["L1", "H1", "V1"]')
+    )
+    out = config_file.parent / "localized"
+    out.mkdir()
+    precious = out / "precious"
+    precious.write_text("keep")
+    code, output = invoke("localize", path, "--overwrite")
+    assert code == 1
+    assert "detector order" in output
+    assert precious.read_text() == "keep"
+
+
+def test_failed_injection_does_not_publish_partial_results(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from injstar.config import inject as config_inject
+
+    original = config_inject._simulation_batches
+
+    def interrupted(inputs: Inputs) -> Iterator[InjectionResult]:
+        yield next(original(inputs))
+        raise ValueError("interrupted injection")
+
+    monkeypatch.setattr(config_inject, "_simulation_batches", interrupted)
+    code, output = invoke("inject", config_file)
+    assert code == 1
+    assert "interrupted injection" in output
+    out = config_file.parent / "out"
+    assert sorted(path.name for path in out.iterdir()) == ["config.json"]
+    monkeypatch.setattr(config_inject, "_simulation_batches", original)
+    assert invoke("inject", config_file)[0] == 0
+
+
+def test_localize_uses_saved_rows_flags_and_sampling(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    import h5py
+
+    from injstar.dataset import ARRAY_FIELDS
+
+    assert invoke("inject", config_file)[0] == 0
+    source = config_file.parent / "out" / "injection_results.h5"
+    result = InjectionResult.read(source)
+    order = np.array([2, 0, 1])
+    replace(
+        result,
+        **{name: np.asarray(getattr(result, name))[order] for name in ARRAY_FIELDS},
+        sampling_frequency=8192.0,
+    ).write(source)
+    # Saved flags, rather than the catalogue's derived flags, select events.
+    with h5py.File(source, "r+") as saved:
+        saved["detected"][:] = [True, False, True]
+    seen: list[tuple[Event, Network]] = []
+
+    class Pool:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> "Pool":
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+        def map(
+            self, task: Callable[[Event], int], batch: Iterable[Event]
+        ) -> list[int]:
+            return [task(event) for event in batch]
+
+    def localize(event: Event, network: Network, **kwargs: Any) -> int:
+        seen.append((event, network))
+        return event.row_index
+
+    monkeypatch.setattr("concurrent.futures.ProcessPoolExecutor", Pool)
+    monkeypatch.setattr("injstar.localize.localize_to_file", localize)
+    code, output = invoke("localize", make_localize_file(config_file))
+    assert code == 0, output
+    assert [event.row_index for event, _ in seen] == [2, 1]
+    columns = read_population_catalogue(config_file.parent / "out" / "injections.h5")
+    for event, network in seen:
+        assert event.coa_time == columns["coa_time"][event.row_index]
+        assert network.sampling_frequency == 8192.0
+        np.testing.assert_array_equal(event.series, result.series[event.row_index])

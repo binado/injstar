@@ -4,7 +4,7 @@ This module needs the optional ``injstar[pycbc]`` extra and raises an
 :class:`ImportError` naming it when PyCBC or LALSimulation is missing.
 :class:`PyCBCWaveformGenerator` implements the
 :class:`~injstar.waveform.WaveformGenerator` protocol with NumPy arrays, so it
-cannot run inside the jitted :func:`~injstar.simulate.inject_events`. Use it to
+cannot run inside the jitted :func:`~injstar.inject.inject_events`. Use it to
 cross-check the JAX backends against LAL.
 """
 

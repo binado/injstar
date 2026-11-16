@@ -1,19 +1,4 @@
-"""Command-line interface.
-
-``injstar snr CONFIG`` simulates every injection of a population and writes
-their per-detector and network SNRs and detection flags. ``injstar run CONFIG``
-also localizes the detected ones with BAYESTAR. ``injstar run CONFIG --resume``
-finishes an interrupted run and ``injstar summarise DIR`` rebuilds its summary
-table::
-
-    injstar snr run.toml --output-dir out
-    injstar run run.toml --output-dir out
-    injstar run run.toml --output-dir out --resume
-    injstar summarise out
-
-This module must stay cheap to import: JAX, ligo.skymap and the pipeline are
-imported inside the commands, never here.
-"""
+"""Lightweight CLI for injection, localization and summary rebuilding."""
 
 import logging
 from collections.abc import Callable, Sequence
@@ -93,10 +78,10 @@ def _main(
 
 def _guarded[T](stage: Callable[[], T]) -> T:
     """Run a stage, turning input and run-directory errors into CLI errors."""
-    # The pipeline pulls in numpy, h5py and pydantic; keep --help instant.
+    # Keep validation imports out of --help.
     from pydantic import ValidationError
 
-    from injstar.pipeline import RunDirectoryError
+    from injstar.config._common import RunDirectoryError
 
     try:
         return stage()

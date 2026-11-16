@@ -85,7 +85,7 @@ def read_population(path: Path) -> Population:
 
 
 def simulation_events(population: Population, gmst: NDArray) -> Population:
-    """The per-event inputs of :func:`injstar.simulate.inject_events`.
+    """The per-event inputs of :func:`injstar.inject.inject_events`.
 
     Parameters
     ----------

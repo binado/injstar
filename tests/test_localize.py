@@ -24,7 +24,7 @@ def test_localize_event_rejects_a_short_series(
     )
 
     with pytest.raises(ValueError, match="BAYESTAR needs"):
-        localize_event(short, network)
+        localize_event(short, network, max_distance=5000.0)
 
 
 @pytest.mark.slow
@@ -35,7 +35,7 @@ def test_zero_noise_map_contains_the_truth(
 
     event, network = event_and_network
 
-    skymap = localize_event(event, network)
+    skymap = localize_event(event, network, max_distance=5000.0)
 
     assert len(skymap) == 19200
     assert set(skymap.colnames) == {
@@ -89,10 +89,10 @@ def test_zero_noise_posterior_prefers_the_true_inclination(
                 np.cos(inclination),
                 2 * 0.3,
                 arrival,
-                network.prior.min_distance,
-                network.prior.max_distance,
-                network.prior.distance_power,
-                network.prior.cosmology,
+                0.0,
+                5000.0,
+                2,
+                False,
                 inputs.gmst,
                 network.sampling_frequency,
                 inputs.first_samples,
@@ -100,7 +100,7 @@ def test_zero_noise_posterior_prefers_the_true_inclination(
                 np.asarray(network.responses, dtype=np.float32),
                 inputs.locations,
                 np.asarray(event.horizon, dtype=float),
-                network.rescale_loglikelihood,
+                1.0,
             )
         )
 

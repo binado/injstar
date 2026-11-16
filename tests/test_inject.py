@@ -7,8 +7,8 @@ from pycbc.types import FrequencySeries
 
 from injstar.dataset import ARRAY_FIELDS
 from injstar.detector.network import DetectorRegistry
+from injstar.inject import greenwich_sidereal_time
 from injstar.population import read_population, simulation_events
-from injstar.simulate import greenwich_sidereal_time
 from injstar.waveform.pycbc import PyCBCWaveformGenerator
 
 from .conftest import PycbcDetector, inject, make_config

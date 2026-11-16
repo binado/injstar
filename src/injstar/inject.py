@@ -58,7 +58,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from injstar import matched_filter
-from injstar.config import RunConfig
 from injstar.dataset import ARRAY_FIELDS, InjectionResult
 from injstar.detector import projection
 from injstar.detector.network import DetectorRegistry
@@ -116,7 +115,17 @@ def _prepare_kernel(
     waveform: WaveformGenerator[jax.Array],
     template: WaveformGenerator[jax.Array],
     network: DetectorRegistry,
-    config: RunConfig,
+    minimum_frequency: float = 20.0,
+    maximum_frequency: float = 1024.0,
+    sampling_frequency: float = 4096.0,
+    segment_duration: float = 8.0,
+    crop_duration: float = 0.1,
+    noise: bool = True,
+    seed: int = 0,
+    batch_size: int = 32,
+    detector_snr: float = 4.0,
+    network_snr: float = 8.0,
+    min_detectors: int = 2,
 ) -> tuple[
     tuple[str, ...],
     Callable[[Mapping[str, jax.Array], jax.Array], dict[str, jax.Array]],
@@ -134,16 +143,16 @@ def _prepare_kernel(
             "template is precessing or has higher modes; set template_approximant "
             "to a dominant-mode aligned-spin model such as IMRPhenomXAS"
         )
-    names, responses, locations = network.arrays(config.network)
+    names, responses, locations = network.arrays(tuple(network.detectors))
     bins = matched_filter.band_bins(
-        minimum_frequency=config.minimum_frequency,
-        maximum_frequency=config.maximum_frequency,
-        sampling_frequency=config.sampling_frequency,
-        segment_duration=config.segment_duration,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+        sampling_frequency=sampling_frequency,
+        segment_duration=segment_duration,
     )
     if len(bins) < 3:
         raise ValueError("the frequency band holds fewer than three bins")
-    delta_f = 1.0 / config.segment_duration
+    delta_f = 1.0 / segment_duration
     frequencies = jnp.asarray(bins * delta_f)
     psd = np.stack(
         [network.detectors[name].sensitivity(np.asarray(frequencies)) for name in names]
@@ -153,15 +162,15 @@ def _prepare_kernel(
     if empty:
         raise ValueError(f"PSD does not cover the frequency band for {empty}")
     inverse_psd = jnp.asarray(inverse)
-    n_samples = round(config.sampling_frequency * config.segment_duration)
-    half = config.crop_samples // 2
-    root = jax.random.key(config.seed)
+    n_samples = round(sampling_frequency * segment_duration)
+    half = (2 * int(crop_duration * sampling_frequency / 2) + 1) // 2
+    root = jax.random.key(seed)
     template_generator = template
 
     def _event_kernel(
         event: Mapping[str, jax.Array], row: jax.Array
     ) -> dict[str, jax.Array]:
-        n, df, rate = n_samples, delta_f, config.sampling_frequency
+        n, df, rate = n_samples, delta_f, sampling_frequency
 
         # The template: the face-on plus polarization at 1 Mpc.
         template, _ = template_generator(
@@ -209,7 +218,7 @@ def _prepare_kernel(
             jnp.cos(phase) + 1j * jnp.sin(phase)
         )
         expected = matched_filter.optimal_snr(data, inverse_psd=inverse_psd, delta_f=df)
-        if config.noise:
+        if noise:
             # The key depends only on the root key and the 64-bit row index.
             high = (row >> 32).astype(jnp.uint32)
             low = (row & 0xFFFFFFFF).astype(jnp.uint32)
@@ -222,10 +231,10 @@ def _prepare_kernel(
             data,
             unit_template,
             inverse_psd=inverse_psd,
-            minimum_frequency=config.minimum_frequency,
-            maximum_frequency=config.maximum_frequency,
-            sampling_frequency=config.sampling_frequency,
-            segment_duration=config.segment_duration,
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=maximum_frequency,
+            sampling_frequency=sampling_frequency,
+            segment_duration=segment_duration,
         )
 
         centre = n // 2 + jnp.round(delay * rate).astype(jnp.int64)
@@ -233,10 +242,9 @@ def _prepare_kernel(
         crop = jnp.take_along_axis(series, centre[:, None] + offsets, axis=-1)
         observed = jnp.max(jnp.abs(crop), axis=-1)
         network = jnp.sqrt(jnp.sum(observed**2))
-        detected = (
-            jnp.sum(observed >= config.detection.detector_snr)
-            >= config.detection.min_detectors
-        ) & (network >= config.detection.network_snr)
+        detected = (jnp.sum(observed >= detector_snr) >= min_detectors) & (
+            network >= network_snr
+        )
 
         return {
             "expected_snr": expected,
@@ -258,12 +266,35 @@ def _inject_batches(
     waveform: WaveformGenerator[jax.Array],
     template: WaveformGenerator[jax.Array],
     network: DetectorRegistry,
-    config: RunConfig,
+    minimum_frequency: float = 20.0,
+    maximum_frequency: float = 1024.0,
+    sampling_frequency: float = 4096.0,
+    segment_duration: float = 8.0,
+    crop_duration: float = 0.1,
+    noise: bool = True,
+    seed: int = 0,
+    batch_size: int = 32,
+    detector_snr: float = 4.0,
+    network_snr: float = 8.0,
+    min_detectors: int = 2,
     rows: NDArray | None = None,
 ) -> Iterator[InjectionResult]:
     """Yield complete batches, reusing one prepared callable and trimming padding."""
     names, kernel = _prepare_kernel(
-        waveform=waveform, template=template, network=network, config=config
+        waveform=waveform,
+        template=template,
+        network=network,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+        sampling_frequency=sampling_frequency,
+        segment_duration=segment_duration,
+        crop_duration=crop_duration,
+        noise=noise,
+        seed=seed,
+        batch_size=batch_size,
+        detector_snr=detector_snr,
+        network_snr=network_snr,
+        min_detectors=min_detectors,
     )
     fields = tuple(
         dict.fromkeys(
@@ -275,7 +306,7 @@ def _inject_batches(
         raise KeyError(f"events lack the fields {missing}")
     if rows is None:
         rows = np.arange(len(next(iter(events.values()))), dtype=np.uint64)
-    count, size = len(rows), config.batch_size
+    count, size = len(rows), batch_size
     for start in range(0, count, size):
         index = np.minimum(np.arange(start, start + size), count - 1)
         valid = min(size, count - start)
@@ -287,7 +318,7 @@ def _inject_batches(
             **{name: values[:valid] for name, values in output.items()},
             row_index=jnp.asarray(rows[start : start + valid], dtype=jnp.uint64),
             detectors=names,
-            sampling_frequency=config.sampling_frequency,
+            sampling_frequency=sampling_frequency,
         )
 
 
@@ -297,7 +328,17 @@ def inject_events(
     waveform: WaveformGenerator[jax.Array],
     template: WaveformGenerator[jax.Array],
     network: DetectorRegistry,
-    config: RunConfig,
+    minimum_frequency: float = 20.0,
+    maximum_frequency: float = 1024.0,
+    sampling_frequency: float = 4096.0,
+    segment_duration: float = 8.0,
+    crop_duration: float = 0.1,
+    noise: bool = True,
+    seed: int = 0,
+    batch_size: int = 32,
+    detector_snr: float = 4.0,
+    network_snr: float = 8.0,
+    min_detectors: int = 2,
     rows: NDArray | None = None,
 ) -> InjectionResult:
     """Simulate injections, returning complete batched SNR and series results.
@@ -311,9 +352,15 @@ def inject_events(
     waveform, template
         Explicit signal and dominant-mode aligned-spin template generators.
     network
-        Detector registry containing the configured network.
-    config
-        Band, sampling, detection, noise seed and batch size settings.
+        Selected registry; its detectors define the detector axis in registry order.
+    minimum_frequency, maximum_frequency, sampling_frequency
+        Frequency band and sample rate in Hz.
+    segment_duration, crop_duration
+        Segment and crop durations in seconds.
+    noise, seed, batch_size
+        Noise generation and batching settings.
+    detector_snr, network_snr, min_detectors
+        Detection thresholds.
     rows
         Original population indices for noise seeding; defaults to input order.
 
@@ -328,7 +375,17 @@ def inject_events(
             waveform=waveform,
             template=template,
             network=network,
-            config=config,
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=maximum_frequency,
+            sampling_frequency=sampling_frequency,
+            segment_duration=segment_duration,
+            crop_duration=crop_duration,
+            noise=noise,
+            seed=seed,
+            batch_size=batch_size,
+            detector_snr=detector_snr,
+            network_snr=network_snr,
+            min_detectors=min_detectors,
             rows=rows,
         )
     )
@@ -338,5 +395,5 @@ def inject_events(
             for name in ARRAY_FIELDS
         },
         detectors=batches[0].detectors,
-        sampling_frequency=config.sampling_frequency,
+        sampling_frequency=sampling_frequency,
     )

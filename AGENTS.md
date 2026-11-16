@@ -4,7 +4,7 @@ This file provides guidance to AI agents when working with code in this reposito
 
 ## Project
 
-`injstar` simulates BAYESTAR sky–distance posteriors for arbitrary detector networks (including ET and CE). Input: a population of compact binaries (CSV/HDF5, gwmock-pop layout) plus a run TOML. Output: one multi-order sky map per detected event and a summary table.
+`injstar` simulates BAYESTAR sky–distance posteriors for arbitrary detector networks (including ET and CE). Input: a population of compact binaries (CSV/HDF5, gwmock-pop layout) plus stage TOMLs. Output: one multi-order sky map per detected event and a summary table.
 
 ## Commands
 
@@ -16,7 +16,7 @@ just fmt                       # ruff check --fix + ruff format
 just typecheck                 # ty check (covers src and tests)
 just test-fast                 # pytest -m "not slow" (skips BAYESTAR tests, which take ~1 min)
 uv run pytest tests/test_cli.py::test_name   # single test
-just run snr|run|summarise ...        # uv run injstar ...
+just run inject|localize|summarise ...        # uv run injstar ...
 ```
 
 A prek pre-commit hook runs ruff and `ty` on the whole tree, so every commit must be a self-consistent tree.
