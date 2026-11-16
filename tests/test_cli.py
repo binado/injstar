@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from injstar.cli import app
 from injstar.config import RunConfig, load_run_config
+from injstar.dataset import InjectionResult
 
 runner = CliRunner()
 
@@ -51,12 +52,15 @@ def test_snr_writes_injections_and_no_maps(config_file: Path) -> None:
     assert "2 of 3 injections detected" in output
     out = config_file.parent / "out"
     assert sorted(path.name for path in out.iterdir()) == [
-        "config.json", "injections.h5",
+        "config.json", "injection_results.h5", "injections.h5",
     ]  # fmt: skip
     columns = read_population_catalogue(out / "injections.h5")
     for name in ("expected_snr_H1", "observed_snr_V1", "horizon_L1", "network_snr"):
         assert columns[name].shape == (3,)
     np.testing.assert_array_equal(columns["detected"], [True, False, True])
+    dataset = InjectionResult.read(out / "injection_results.h5")
+    np.testing.assert_allclose(dataset.network_snr, columns["network_snr"])
+    np.testing.assert_array_equal(dataset.detected, columns["detected"])
     assert "event_id" not in columns
 
 
@@ -131,7 +135,9 @@ def test_invalid_config_reports_an_error(config_file: Path) -> None:
 
 
 @pytest.mark.slow
-def test_run_resume_and_summarise(config_file: Path, population_csv: Path) -> None:
+def test_run_resume_and_summarise(
+    config_file: Path, population_csv: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     lines = population_csv.read_text().splitlines()
     population_csv.write_text(
         "\n".join(
@@ -148,6 +154,12 @@ def test_run_resume_and_summarise(config_file: Path, population_csv: Path) -> No
     out = config_file.parent / "out"
     assert invoke("snr", config_file)[0] == 0
 
+    def disabled(*args: object, **kwargs: object) -> None:
+        pytest.fail("localization must reuse stored injection results")
+
+    monkeypatch.setattr("injstar.pipeline._simulation_batches", disabled)
+    monkeypatch.setattr("injstar.simulate.inject_events", disabled)
+    monkeypatch.setattr("injstar.waveform.waveform", disabled)
     code, output = invoke("run", config_file, "--workers", 2)
 
     assert code == 0, output
@@ -196,3 +208,55 @@ def test_generated_column_collision_rejected(
     code, output = invoke("snr", config_file)
     assert code == 1
     assert name in output
+
+
+def test_partial_batches_are_stored_once(config_file: Path) -> None:
+    code, output = invoke("snr", config_file)
+    assert code == 0, output
+    out = config_file.parent / "out"
+    result = InjectionResult.read(out / "injection_results.h5")
+    np.testing.assert_array_equal(result.row_index, [0, 1, 2])
+    assert result.series.shape[0] == 3
+    columns = read_population_catalogue(out / "injections.h5")
+    np.testing.assert_array_equal(result.observed_snr[:, 0], columns["observed_snr_H1"])
+    assert not list(out.glob("*.partial.h5"))
+
+
+@pytest.mark.parametrize("missing", ["injection_results.h5", "injections.h5"])
+def test_incomplete_simulation_is_recomputed(config_file: Path, missing: str) -> None:
+    assert invoke("snr", config_file)[0] == 0
+    out = config_file.parent / "out"
+    (out / missing).unlink()
+    # A legacy CSV is irrelevant to completion of the simulation stage.
+    (out / "snr.csv").write_text("legacy")
+    code, output = invoke("snr", config_file)
+    assert code == 0, output
+    result = InjectionResult.read(out / "injection_results.h5")
+    columns = read_population_catalogue(out / "injections.h5")
+    np.testing.assert_array_equal(result.network_snr, columns["network_snr"])
+
+
+def test_run_without_detections(
+    config_file: Path, population_csv: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lines = population_csv.read_text().splitlines()
+    header = lines[0].split(",")
+    distance = header.index("distance")
+    for index in range(1, len(lines)):
+        values = lines[index].split(",")
+        values[distance] = "1000000000.0"
+        lines[index] = ",".join(values)
+    population_csv.write_text("\n".join(lines) + "\n")
+
+    def disabled(*args: object, **kwargs: object) -> None:
+        pytest.fail("no detections should not start localization")
+
+    monkeypatch.setattr("injstar.pipeline.ProcessPoolExecutor", disabled)
+    code, output = invoke("run", config_file)
+    assert code == 0, output
+    out = config_file.parent / "out"
+    columns = read_population_catalogue(out / "summary.h5")
+    assert not np.any(columns["detected"])
+    assert not np.any(columns["localized"])
+    assert not (out / "skymaps").exists()
+    assert InjectionResult.read(out / "injection_results.h5").series.shape[0] == 3

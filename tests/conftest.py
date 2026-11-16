@@ -5,6 +5,7 @@ import pytest
 from numpy.typing import NDArray
 
 from injstar.config import RunConfig
+from injstar.dataset import InjectionResult
 from injstar.detector.network import (
     DetectorGeometry,
     DetectorRegistry,
@@ -14,7 +15,8 @@ from injstar.detector.projection import Detector
 from injstar.localize import Event, Network
 from injstar.population import read_population, simulation_events
 from injstar.runtime import configure_runtime
-from injstar.simulate import Simulator, greenwich_sidereal_time
+from injstar.simulate import greenwich_sidereal_time, inject_events
+from injstar.waveform import waveform
 from injstar.waveform.pycbc import PyCBCWaveformGenerator
 
 # 64-bit JAX has to be chosen before any test touches the backend.
@@ -139,6 +141,29 @@ def make_config(tmp_path: Path, **fields: object) -> RunConfig:
     return RunConfig.model_validate(defaults | fields)
 
 
+def inject(
+    events: dict[str, np.ndarray],
+    *,
+    config: RunConfig,
+    network: DetectorRegistry,
+    rows: np.ndarray | None = None,
+) -> InjectionResult:
+    """Inject using the explicit generators specified by the test configuration."""
+    return inject_events(
+        events,
+        waveform=waveform(
+            config.waveform_approximant, reference_frequency=config.reference_frequency
+        ),
+        template=waveform(
+            config.template_approximant or config.waveform_approximant,
+            reference_frequency=config.reference_frequency,
+        ),
+        network=network,
+        config=config,
+        rows=rows,
+    )
+
+
 @pytest.fixture
 def event_and_network(
     tmp_path: Path, registry: DetectorRegistry, population_csv: Path
@@ -148,18 +173,20 @@ def event_and_network(
     events = simulation_events(
         population, greenwich_sidereal_time(population["coa_time"])
     )
-    drawn = Simulator.from_config(config, registry).series(
-        {name: values[:1] for name, values in events.items()}
+    drawn = inject(
+        {name: values[:1] for name, values in events.items()},
+        config=config,
+        network=registry,
     )
     names, responses, locations = registry.arrays(config.network)
     event = Event(
         row_index=0,
         coa_time=float(population["coa_time"][0]),
-        series=drawn.series[0],
-        epochs=drawn.epochs[0],
-        snr=drawn.scalars.observed_snr[0],
-        bandwidth=drawn.scalars.bandwidth[0],
-        horizon=drawn.scalars.horizon[0],
+        series=np.asarray(drawn.series[0]),
+        epochs=np.asarray(drawn.epochs[0]),
+        snr=np.asarray(drawn.observed_snr[0]),
+        bandwidth=np.asarray(drawn.bandwidth[0]),
+        horizon=np.asarray(drawn.horizon[0]),
     )
     network = Network(
         names, responses, locations, config.sampling_frequency, config.prior, 1.0

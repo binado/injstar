@@ -49,9 +49,7 @@ coalescence time. JAX must run in 64-bit mode: call
 :func:`injstar.runtime.configure_runtime` first.
 """
 
-from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Self
+from collections.abc import Callable, Iterator, Mapping
 
 import jax
 import jax.numpy as jnp
@@ -61,10 +59,10 @@ from numpy.typing import NDArray
 
 from injstar import matched_filter
 from injstar.config import RunConfig
+from injstar.dataset import ARRAY_FIELDS, InjectionResult
 from injstar.detector import projection
 from injstar.detector.network import DetectorRegistry
 from injstar.waveform import WaveformGenerator
-from injstar.waveform import waveform as make_waveform
 
 #: Per-event inputs that do not depend on the waveform models, each an array over
 #: events.
@@ -77,68 +75,6 @@ EXTRINSIC_FIELDS = (
 
 #: The template is the waveform seen face-on, at 1 Mpc and zero phase.
 _FACE_ON = {"distance": 1.0, "inclination": 0.0, "coa_phase": 0.0}
-
-#: Per-event outputs shared by :meth:`Simulator.snr` and :meth:`Simulator.series`,
-#: matching the fields of :class:`SnrResult`.
-SCALAR_FIELDS = (
-    "expected_snr",
-    "observed_snr",
-    "horizon",
-    "bandwidth",
-    "network_snr",
-    "detected",
-)
-
-
-@dataclass(frozen=True)
-class SnrResult:
-    """Scalar outputs for a set of events; arrays lead with the event axis.
-
-    Attributes
-    ----------
-    expected_snr
-        Optimal SNR of the injected signal, ``rho_j``, before noise, shape
-        ``(events, detectors)``.
-    observed_snr
-        Peak ``|z_j|`` of the cropped series, shape ``(events, detectors)``.
-    horizon
-        SNR = 1 distances in Mpc, shape ``(events, detectors)``.
-    bandwidth
-        RMS angular-frequency bandwidth in rad/s, shape
-        ``(events, detectors)``; the timing uncertainty at SNR ``s`` is
-        ``1 / (s * bandwidth)``.
-    network_snr
-        Root sum square of ``observed_snr``, shape ``(events,)``.
-    detected
-        Detection flag, shape ``(events,)``.
-    """
-
-    expected_snr: NDArray[np.float64]
-    observed_snr: NDArray[np.float64]
-    horizon: NDArray[np.float64]
-    bandwidth: NDArray[np.float64]
-    network_snr: NDArray[np.float64]
-    detected: NDArray[np.bool_]
-
-
-@dataclass(frozen=True)
-class SeriesResult:
-    """SNR time series for a set of events.
-
-    Attributes
-    ----------
-    scalars
-        The matching :class:`SnrResult`.
-    series
-        Complex SNR, shape ``(events, detectors, crop_samples)``.
-    epochs
-        Time of each series' first sample minus the event's geocentric
-        coalescence time, in seconds, shape ``(events, detectors)``.
-    """
-
-    scalars: SnrResult
-    series: NDArray[np.complex128]
-    epochs: NDArray[np.float64]
 
 
 def greenwich_sidereal_time(gps_times: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -175,211 +111,63 @@ def _noise_spectrum(
     return jnp.sqrt(psd / (4 * delta_f)) * white
 
 
-class Simulator:
-    """SNR-level simulator for one network and one band.
-
-    Build it from a run configuration with :meth:`from_config`.
-
-    Parameters
-    ----------
-    names
-        Detector names.
-    responses
-        Earth-fixed response tensors, shape ``(detectors, 3, 3)``.
-    locations
-        Earth-fixed positions in metres, shape ``(detectors, 3)``.
-    psd
-        One-sided PSD of each detector on the bins of
-        :func:`injstar.matched_filter.band_bins`, shape ``(detectors, bins)``;
-        non-finite where it is undefined.
-    minimum_frequency, maximum_frequency
-        Frequency band of the matched filter in Hz.
-    sampling_frequency
-        Sample rate of the SNR series in Hz.
-    segment_duration
-        Length in seconds of the periodic segment; the frequency spacing is its
-        inverse.
-    crop_samples
-        Odd number of samples in the cropped SNR series.
-    waveform
-        Waveform model of the injected signal.
-    template
-        Waveform model of the matched-filter template; its face-on plus
-        polarization at 1 Mpc is the template and sets the horizon. Must be a
-        dominant-mode model.
-    detector_snr, network_snr, min_detectors
-        Detection rule: at least ``min_detectors`` detectors reach
-        ``detector_snr`` and the network SNR reaches ``network_snr``.
-    noise
-        Whether to add Gaussian noise to the SNR series.
-    seed
-        Seed of the noise.
-    batch_size
-        Events simulated per jitted call.
-    """
-
-    def __init__(
-        self,
-        *,
-        names: Sequence[str],
-        responses: NDArray[np.float64],
-        locations: NDArray[np.float64],
-        psd: NDArray[np.float64],
-        minimum_frequency: float,
-        maximum_frequency: float,
-        sampling_frequency: float,
-        segment_duration: float,
-        crop_samples: int,
-        waveform: WaveformGenerator[jax.Array],
-        template: WaveformGenerator[jax.Array],
-        detector_snr: float,
-        network_snr: float,
-        min_detectors: int,
-        noise: bool,
-        seed: int,
-        batch_size: int,
-    ) -> None:
-        if not jax.config.jax_enable_x64:
-            raise RuntimeError(
-                "JAX must run in 64-bit mode; call injstar.runtime.configure_runtime()"
-            )
-        self.names = tuple(names)
-        self.minimum_frequency = minimum_frequency
-        self.maximum_frequency = maximum_frequency
-        self.sampling_frequency = sampling_frequency
-        self.segment_duration = segment_duration
-        self.n_samples = round(sampling_frequency * segment_duration)
-        self.delta_f = 1.0 / segment_duration
-        self.crop_samples = crop_samples
-        self.noise = noise
-        self.batch_size = batch_size
-        bins = matched_filter.band_bins(
-            minimum_frequency=minimum_frequency,
-            maximum_frequency=maximum_frequency,
-            sampling_frequency=sampling_frequency,
-            segment_duration=segment_duration,
+def _prepare_kernel(
+    *,
+    waveform: WaveformGenerator[jax.Array],
+    template: WaveformGenerator[jax.Array],
+    network: DetectorRegistry,
+    config: RunConfig,
+) -> tuple[
+    tuple[str, ...],
+    Callable[[Mapping[str, jax.Array], jax.Array], dict[str, jax.Array]],
+]:
+    """Prepare the network once and compile the vectorized single-event kernel."""
+    if not jax.config.jax_enable_x64:
+        raise RuntimeError(
+            "JAX must run in 64-bit mode; call injstar.runtime.configure_runtime()"
         )
-        self.frequencies = bins * self.delta_f
-        if psd.shape[-1] != len(bins):
-            raise ValueError(
-                f"psd has {psd.shape[-1]} bins but the band holds {len(bins)}"
-            )
-
-        self._inverse_psd = np.where(np.isfinite(psd), 1.0 / psd, 0.0)
-        empty = [
-            name
-            for name, row in zip(self.names, self._inverse_psd, strict=True)
-            if not row.any()
-        ]
-        if empty:
-            raise ValueError(f"PSD does not cover the frequency band for {empty}")
-
-        self._responses = responses
-        self._locations = locations
-        self._half = crop_samples // 2
-        self._waveform = waveform
-        self._template = template
-        self._detector_snr = detector_snr
-        self._network_snr = network_snr
-        self._min_detectors = min_detectors
-        self._root = jax.random.key(seed)
-        self._batched = jax.jit(jax.vmap(self._event))
-
-    @classmethod
-    def from_config(cls, config: RunConfig, registry: DetectorRegistry) -> Self:
-        """Build the simulator for a run configuration.
-
-        Parameters
-        ----------
-        config
-            Run configuration: band, sampling, detection rule, seed, batch size.
-        registry
-            Detector registry holding the configured network.
-
-        Raises
-        ------
-        ValueError
-            If the band holds fewer than three bins, the template model is
-            precessing or has modes above the dominant one (set
-            ``template_approximant``), or a detector's PSD does not cover the
-            band.
-        """
-        names, responses, locations = registry.arrays(config.network)
-
-        bins = matched_filter.band_bins(
-            minimum_frequency=config.minimum_frequency,
-            maximum_frequency=config.maximum_frequency,
-            sampling_frequency=config.sampling_frequency,
-            segment_duration=config.segment_duration,
+    if (
+        getattr(template, "is_precessing", False)
+        or getattr(template, "highest_mode", 2) > 2
+    ):
+        raise ValueError(
+            "template is precessing or has higher modes; set template_approximant "
+            "to a dominant-mode aligned-spin model such as IMRPhenomXAS"
         )
-        if len(bins) < 3:
-            raise ValueError("the frequency band holds fewer than three bins")
-        frequencies = bins / config.segment_duration
-        psd = np.stack(
-            [registry.detectors[name].sensitivity(frequencies) for name in names]
-        )
+    names, responses, locations = network.arrays(config.network)
+    bins = matched_filter.band_bins(
+        minimum_frequency=config.minimum_frequency,
+        maximum_frequency=config.maximum_frequency,
+        sampling_frequency=config.sampling_frequency,
+        segment_duration=config.segment_duration,
+    )
+    if len(bins) < 3:
+        raise ValueError("the frequency band holds fewer than three bins")
+    delta_f = 1.0 / config.segment_duration
+    frequencies = jnp.asarray(bins * delta_f)
+    psd = np.stack(
+        [network.detectors[name].sensitivity(np.asarray(frequencies)) for name in names]
+    )
+    inverse = np.where(np.isfinite(psd), 1.0 / psd, 0.0)
+    empty = [name for name, row in zip(names, inverse, strict=True) if not row.any()]
+    if empty:
+        raise ValueError(f"PSD does not cover the frequency band for {empty}")
+    inverse_psd = jnp.asarray(inverse)
+    n_samples = round(config.sampling_frequency * config.segment_duration)
+    half = config.crop_samples // 2
+    root = jax.random.key(config.seed)
+    template_generator = template
 
-        waveform = make_waveform(
-            config.waveform_approximant,
-            reference_frequency=config.reference_frequency,
-        )
-        template_approximant = (
-            config.template_approximant or config.waveform_approximant
-        )
-        template = make_waveform(
-            template_approximant, reference_frequency=config.reference_frequency
-        )
-        if template.is_precessing or template.highest_mode > 2:
-            raise ValueError(
-                f"template {template_approximant!r} is precessing or has higher "
-                "modes; set template_approximant to a dominant-mode aligned-spin "
-                "model such as IMRPhenomXAS"
-            )
-        return cls(
-            names=names,
-            responses=responses,
-            locations=locations,
-            psd=psd,
-            minimum_frequency=config.minimum_frequency,
-            maximum_frequency=config.maximum_frequency,
-            sampling_frequency=config.sampling_frequency,
-            segment_duration=config.segment_duration,
-            crop_samples=config.crop_samples,
-            waveform=waveform,
-            template=template,
-            detector_snr=config.detection.detector_snr,
-            network_snr=config.detection.network_snr,
-            min_detectors=config.detection.min_detectors,
-            noise=config.noise,
-            seed=config.seed,
-            batch_size=config.batch_size,
-        )
-
-    @property
-    def event_fields(self) -> tuple[str, ...]:
-        """Per-event inputs: the extrinsic ones and those the models read."""
-        return tuple(
-            dict.fromkeys(
-                (
-                    *EXTRINSIC_FIELDS,
-                    *self._waveform.parameter_names,
-                    *self._template.parameter_names,
-                )
-            )
-        )
-
-    def _event(
-        self, event: Mapping[str, jax.Array], row: jax.Array
+    def _event_kernel(
+        event: Mapping[str, jax.Array], row: jax.Array
     ) -> dict[str, jax.Array]:
-        """Simulate one event; every output leads with the detector axis."""
-        frequencies = jnp.asarray(self.frequencies)
-        inverse_psd = jnp.asarray(self._inverse_psd)
-        n, df, rate = self.n_samples, self.delta_f, self.sampling_frequency
+        n, df, rate = n_samples, delta_f, config.sampling_frequency
 
         # The template: the face-on plus polarization at 1 Mpc.
-        template, _ = self._template(
+        template, _ = template_generator(
             frequencies,
-            {name: event[name] for name in self._template.parameter_names} | _FACE_ON,
+            {name: event[name] for name in template_generator.parameter_names}
+            | _FACE_ON,
         )
         sigma = matched_filter.optimal_snr(
             template, inverse_psd=inverse_psd, delta_f=df
@@ -402,18 +190,18 @@ class Simulator:
                 polarization_angle=event["polarization_angle"],
                 **sky,
             )
-        )(jnp.asarray(self._responses))
+        )(jnp.asarray(responses))
         delay = jax.vmap(
             lambda location: projection.time_delay_from_geocenter(
                 location, event["gmst"], **sky
             )
-        )(jnp.asarray(self._locations))
+        )(jnp.asarray(locations))
 
         # The signal: the full projected strain, with the geocentric time on
         # sample n // 2 of the periodic segment.
-        plus, cross = self._waveform(
+        plus, cross = waveform(
             frequencies,
-            {name: event[name] for name in self._waveform.parameter_names},
+            {name: event[name] for name in waveform.parameter_names},
         )
         peak_time = (n // 2) / rate + delay
         phase = -2 * jnp.pi * frequencies * peak_time[:, None]
@@ -421,11 +209,11 @@ class Simulator:
             jnp.cos(phase) + 1j * jnp.sin(phase)
         )
         expected = matched_filter.optimal_snr(data, inverse_psd=inverse_psd, delta_f=df)
-        if self.noise:
+        if config.noise:
             # The key depends only on the root key and the 64-bit row index.
             high = (row >> 32).astype(jnp.uint32)
             low = (row & 0xFFFFFFFF).astype(jnp.uint32)
-            key = jax.random.fold_in(jax.random.fold_in(self._root, high), low)
+            key = jax.random.fold_in(jax.random.fold_in(root, high), low)
             draw = jax.random.normal(key, (*inverse_psd.shape, 2))
             data = data + _noise_spectrum(
                 draw[..., 0] + 1j * draw[..., 1], inverse_psd=inverse_psd, delta_f=df
@@ -434,20 +222,21 @@ class Simulator:
             data,
             unit_template,
             inverse_psd=inverse_psd,
-            minimum_frequency=self.minimum_frequency,
-            maximum_frequency=self.maximum_frequency,
-            sampling_frequency=self.sampling_frequency,
-            segment_duration=self.segment_duration,
+            minimum_frequency=config.minimum_frequency,
+            maximum_frequency=config.maximum_frequency,
+            sampling_frequency=config.sampling_frequency,
+            segment_duration=config.segment_duration,
         )
 
         centre = n // 2 + jnp.round(delay * rate).astype(jnp.int64)
-        offsets = jnp.arange(-self._half, self._half + 1)
+        offsets = jnp.arange(-half, half + 1)
         crop = jnp.take_along_axis(series, centre[:, None] + offsets, axis=-1)
         observed = jnp.max(jnp.abs(crop), axis=-1)
         network = jnp.sqrt(jnp.sum(observed**2))
-        detected = (jnp.sum(observed >= self._detector_snr) >= self._min_detectors) & (
-            network >= self._network_snr
-        )
+        detected = (
+            jnp.sum(observed >= config.detection.detector_snr)
+            >= config.detection.min_detectors
+        ) & (network >= config.detection.network_snr)
 
         return {
             "expected_snr": expected,
@@ -457,75 +246,97 @@ class Simulator:
             "network_snr": network,
             "detected": detected,
             "series": crop,
-            "epochs": (centre - self._half - n // 2) / rate,
+            "epochs": (centre - half - n // 2) / rate,
         }
 
-    def _batches(
-        self, events: Mapping[str, NDArray], rows: NDArray
-    ) -> Iterator[tuple[int, dict[str, jax.Array], jax.Array]]:
-        """Fixed-size batches, the last padded by repeating its final event."""
-        fields = self.event_fields
-        missing = [name for name in fields if name not in events]
-        if missing:
-            raise KeyError(f"events lack the fields {missing}")
-        count = len(rows)
-        size = self.batch_size
-        for start in range(0, count, size):
-            index = np.minimum(np.arange(start, start + size), count - 1)
-            batch = {
-                name: jnp.asarray(
-                    np.asarray(events[name])[index],
-                    dtype=jnp.float64,
-                )
-                for name in fields
-            }
-            yield (
-                min(size, count - start),
-                batch,
-                jnp.asarray(rows[index], dtype=jnp.uint64),
-            )
+    return names, jax.jit(jax.vmap(_event_kernel))
 
-    def _run(
-        self, events: Mapping[str, NDArray], keep: Sequence[str], rows: NDArray | None
-    ) -> dict:
-        if rows is None:
-            rows = np.arange(len(next(iter(events.values()))), dtype=np.uint64)
-        chunks: dict[str, list[np.ndarray]] = {name: [] for name in keep}
-        for valid, batch, batch_rows in self._batches(events, rows):
-            output = self._batched(batch, batch_rows)
-            for name in keep:
-                chunks[name].append(np.asarray(output[name])[:valid])
-        return {name: np.concatenate(parts) for name, parts in chunks.items()}
 
-    def snr(
-        self, events: Mapping[str, NDArray], *, rows: NDArray | None = None
-    ) -> SnrResult:
-        """Expected and observed SNRs and detection flags.
+def _inject_batches(
+    events: Mapping[str, NDArray],
+    *,
+    waveform: WaveformGenerator[jax.Array],
+    template: WaveformGenerator[jax.Array],
+    network: DetectorRegistry,
+    config: RunConfig,
+    rows: NDArray | None = None,
+) -> Iterator[InjectionResult]:
+    """Yield complete batches, reusing one prepared callable and trimming padding."""
+    names, kernel = _prepare_kernel(
+        waveform=waveform, template=template, network=network, config=config
+    )
+    fields = tuple(
+        dict.fromkeys(
+            (*EXTRINSIC_FIELDS, *waveform.parameter_names, *template.parameter_names)
+        )
+    )
+    missing = [name for name in fields if name not in events]
+    if missing:
+        raise KeyError(f"events lack the fields {missing}")
+    if rows is None:
+        rows = np.arange(len(next(iter(events.values()))), dtype=np.uint64)
+    count, size = len(rows), config.batch_size
+    for start in range(0, count, size):
+        index = np.minimum(np.arange(start, start + size), count - 1)
+        valid = min(size, count - start)
+        batch = {
+            name: jnp.asarray(events[name][index], dtype=jnp.float64) for name in fields
+        }
+        output = kernel(batch, jnp.asarray(rows[index], dtype=jnp.uint64))
+        yield InjectionResult(
+            **{name: values[:valid] for name, values in output.items()},
+            row_index=jnp.asarray(rows[start : start + valid], dtype=jnp.uint64),
+            detectors=names,
+            sampling_frequency=config.sampling_frequency,
+        )
 
-        Parameters
-        ----------
-        events
-            Arrays over events for each name in :attr:`event_fields`. Masses
-            are detector-frame in solar masses, distance in Mpc, angles in
-            radians. Other entries are ignored.
-        rows
-            Original zero-based row indices used to seed noise. Defaults to
-            consecutive indices in input order.
-        """
-        return SnrResult(**self._run(events, SCALAR_FIELDS, rows))
 
-    def series(
-        self, events: Mapping[str, NDArray], *, rows: NDArray | None = None
-    ) -> SeriesResult:
-        """Cropped SNR time series, with the scalars of :meth:`snr`.
+def inject_events(
+    events: Mapping[str, NDArray],
+    *,
+    waveform: WaveformGenerator[jax.Array],
+    template: WaveformGenerator[jax.Array],
+    network: DetectorRegistry,
+    config: RunConfig,
+    rows: NDArray | None = None,
+) -> InjectionResult:
+    """Simulate injections, returning complete batched SNR and series results.
 
-        Parameters
-        ----------
-        events
-            As for :meth:`snr`.
-        rows
-            Original row indices, as for :meth:`snr`.
-        """
-        output = self._run(events, (*SCALAR_FIELDS, "series", "epochs"), rows)
-        series, epochs = output.pop("series"), output.pop("epochs")
-        return SeriesResult(SnrResult(**output), series, epochs)
+    Parameters
+    ----------
+    events
+        Arrays with a leading injection axis. Masses are detector-frame in
+        solar masses, distances in Mpc and angles in radians. Inputs include
+        ``EXTRINSIC_FIELDS`` and both generators' parameter names.
+    waveform, template
+        Explicit signal and dominant-mode aligned-spin template generators.
+    network
+        Detector registry containing the configured network.
+    config
+        Band, sampling, detection, noise seed and batch size settings.
+    rows
+        Original population indices for noise seeding; defaults to input order.
+
+    Returns
+    -------
+    InjectionResult
+        Arrays with a leading injection axis, even for one injection.
+    """
+    batches = list(
+        _inject_batches(
+            events,
+            waveform=waveform,
+            template=template,
+            network=network,
+            config=config,
+            rows=rows,
+        )
+    )
+    return InjectionResult(
+        **{
+            name: jnp.concatenate([getattr(batch, name) for batch in batches])
+            for name in ARRAY_FIELDS
+        },
+        detectors=batches[0].detectors,
+        sampling_frequency=config.sampling_frequency,
+    )
