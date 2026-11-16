@@ -231,7 +231,7 @@ def test_collect_stored_summaries(
         np.testing.assert_equal(
             [float(item) for item in row.values()], list(asdict(value).values())
         )
-        assert row["log_bci"] == "nan"
+        assert np.isnan(float(row["log_bci"]))
 
 
 def test_collect_rejects_a_map_without_summary(tmp_path: Path, map_file: Path) -> None:

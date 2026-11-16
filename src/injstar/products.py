@@ -5,13 +5,13 @@ Computes per-map statistics, stores them in FITS and collects them in CSV.
 Nothing here imports JAX.
 """
 
-import csv
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
 import numpy as np
+import polars as pl
 from numpy.typing import NDArray
 
 from injstar import io
@@ -85,6 +85,14 @@ def statistic_names() -> tuple[str, ...]:
     return tuple(
         field.name for field in fields(LocalizationSummary) if field.name != "row_index"
     )
+
+
+def _summary_schema() -> dict[str, pl.DataType]:
+    """Ordered CSV schema, including for runs with no localizations."""
+    return {
+        "row_index": pl.Int64(),
+        **{name: pl.Float64() for name in statistic_names()},
+    }
 
 
 def _distance_statistics(
@@ -225,18 +233,15 @@ def build_summary(output_dir: Path) -> Path:
     injection catalogue is read. An empty run produces a header-only CSV.
     """
     output_dir = Path(output_dir)
-    summaries = sorted(
-        (
-            LocalizationSummary.from_fits(path)
+    summaries = pl.DataFrame(
+        [
+            asdict(LocalizationSummary.from_fits(path))
             for path in (output_dir / "skymaps").glob("*.multiorder.fits")
-        ),
-        key=lambda summary: summary.row_index,
+        ],
+        schema=_summary_schema(),
     )
     target = output_dir / io.SUMMARY_FILE
-    with target.open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=("row_index", *statistic_names()))
-        writer.writeheader()
-        writer.writerows(asdict(summary) for summary in summaries)
+    summaries.sort("row_index").write_csv(target)
     return target
 
 
@@ -271,30 +276,25 @@ def collect_summaries(
     output = Path(output)
     if output.exists() and not overwrite:
         raise ValueError(f"{output} exists; pass --overwrite to replace it")
-    names = ("row_index", *statistic_names())
-    rows: dict[int, dict[str, str]] = {}
-    count = 0
+    schema = _summary_schema()
+    frames = []
     for directory in directories:
-        count += 1
         path = Path(directory) / io.SUMMARY_FILE
-        with path.open(newline="") as stream:
-            reader = csv.DictReader(stream)
-            if reader.fieldnames != list(names):
-                raise ValueError(f"{path} has unexpected summary columns")
-            for row in reader:
-                # Parse before opening the destination, including all statistics.
-                if None in row or any(row[name] is None for name in names):
-                    raise ValueError(f"{path} has an incomplete summary row")
-                index = int(row["row_index"])
-                if index in rows:
-                    raise ValueError(f"duplicate row_index {index}")
-                for name in statistic_names():
-                    float(row[name])
-                rows[index] = row
-    if not count:
+        try:
+            frame = pl.read_csv(path, schema_overrides=schema)
+        except pl.exceptions.PolarsError as error:
+            raise ValueError(f"{path}: {error}") from error
+        if frame.columns != list(schema):
+            raise ValueError(f"{path} has unexpected summary columns")
+        if any(frame.null_count().row(0)):
+            raise ValueError(f"{path} has an incomplete summary row")
+        frames.append(frame)
+    if not frames:
         raise ValueError("no summary directories supplied")
+    combined = pl.concat(frames)
+    if combined["row_index"].is_duplicated().any():
+        raise ValueError("duplicate row_index in summaries")
+    combined = combined.sort("row_index")
     with output.open("w" if overwrite else "x", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=names)
-        writer.writeheader()
-        writer.writerows(rows[index] for index in sorted(rows))
+        combined.write_csv(stream)
     return output

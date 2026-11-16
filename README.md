@@ -97,7 +97,7 @@ CSV columns, in order, are `row_index`, `area_50`, `area_90`, `searched_area`,
 and distances in Mpc; probabilities and log Bayes factors are dimensionless.
 `row_index` is the zero-based original catalogue index. Rows are sorted by that
 index and include only localized events, with no injection metadata or
-`localized` flag. Unavailable statistics are `nan`; an empty run writes only
+`localized` flag. Unavailable statistics are `NaN`; an empty run writes only
 the header. FITS stores the same columns with an integer index and float64
 statistics; the `SUMMARY` extension is the source for the CSV. Read sky maps
 with `hdu=1`.
