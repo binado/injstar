@@ -5,13 +5,13 @@ Computes per-map statistics, stores them in FITS and collects them in CSV.
 Nothing here imports JAX.
 """
 
-import csv
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
 import numpy as np
+import polars as pl
 from numpy.typing import NDArray
 
 from injstar import io
@@ -85,6 +85,14 @@ def statistic_names() -> tuple[str, ...]:
     return tuple(
         field.name for field in fields(LocalizationSummary) if field.name != "row_index"
     )
+
+
+def _summary_schema() -> dict[str, pl.DataType]:
+    """Ordered CSV schema, including for runs with no localizations."""
+    return {
+        "row_index": pl.Int64(),
+        **{name: pl.Float64() for name in statistic_names()},
+    }
 
 
 def _distance_statistics(
@@ -225,16 +233,68 @@ def build_summary(output_dir: Path) -> Path:
     injection catalogue is read. An empty run produces a header-only CSV.
     """
     output_dir = Path(output_dir)
-    summaries = sorted(
-        (
-            LocalizationSummary.from_fits(path)
+    summaries = pl.DataFrame(
+        [
+            asdict(LocalizationSummary.from_fits(path))
             for path in (output_dir / "skymaps").glob("*.multiorder.fits")
-        ),
-        key=lambda summary: summary.row_index,
+        ],
+        schema=_summary_schema(),
     )
     target = output_dir / io.SUMMARY_FILE
-    with target.open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=("row_index", *statistic_names()))
-        writer.writeheader()
-        writer.writerows(asdict(summary) for summary in summaries)
+    summaries.sort("row_index").write_csv(target)
     return target
+
+
+def collect_summaries(
+    directories: Iterable[Path], output: Path, *, overwrite: bool = False
+) -> Path:
+    """Combine chunk summaries in original row order without moving maps.
+
+    Parameters
+    ----------
+    directories
+        Explicit localization directories from the same population and
+        scientific configuration. Provenance is the caller's responsibility.
+    output
+        Destination CSV. Its parent directory must exist.
+    overwrite
+        Replace an existing destination.
+
+    Returns
+    -------
+    pathlib.Path
+        The combined summary. Header-only input summaries are accepted.
+
+    Raises
+    ------
+    ValueError
+        If no directories are supplied, columns differ, indices overlap,
+        or the destination exists without overwrite permission.
+    FileNotFoundError
+        If an input summary is missing.
+    """
+    output = Path(output)
+    if output.exists() and not overwrite:
+        raise ValueError(f"{output} exists; pass --overwrite to replace it")
+    schema = _summary_schema()
+    frames = []
+    for directory in directories:
+        path = Path(directory) / io.SUMMARY_FILE
+        try:
+            frame = pl.read_csv(path, schema_overrides=schema)
+        except pl.exceptions.PolarsError as error:
+            raise ValueError(f"{path}: {error}") from error
+        if frame.columns != list(schema):
+            raise ValueError(f"{path} has unexpected summary columns")
+        if any(frame.null_count().row(0)):
+            raise ValueError(f"{path} has an incomplete summary row")
+        frames.append(frame)
+    if not frames:
+        raise ValueError("no summary directories supplied")
+    combined = pl.concat(frames)
+    if combined["row_index"].is_duplicated().any():
+        raise ValueError("duplicate row_index in summaries")
+    combined = combined.sort("row_index")
+    with output.open("w" if overwrite else "x", newline="") as stream:
+        combined.write_csv(stream)
+    return output

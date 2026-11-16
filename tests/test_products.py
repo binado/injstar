@@ -231,7 +231,7 @@ def test_collect_stored_summaries(
         np.testing.assert_equal(
             [float(item) for item in row.values()], list(asdict(value).values())
         )
-        assert row["log_bci"] == "nan"
+        assert np.isnan(float(row["log_bci"]))
 
 
 def test_collect_rejects_a_map_without_summary(tmp_path: Path, map_file: Path) -> None:
@@ -245,3 +245,74 @@ def test_collect_rejects_a_map_without_summary(tmp_path: Path, map_file: Path) -
     shutil.copyfile(map_file, path)
     with pytest.raises(ValueError, match="has no SUMMARY extension"):
         build_summary(tmp_path)
+
+
+@pytest.fixture
+def summary_directories(tmp_path: Path, summary: LocalizationSummary) -> list[Path]:
+    import csv
+    from dataclasses import asdict, replace
+
+    directories = [tmp_path / name for name in ("a", "b", "empty")]
+    for directory, indices in zip(directories, [[10, 2], [100, 3], []], strict=True):
+        directory.mkdir()
+        with (directory / "summary.csv").open("w", newline="") as stream:
+            writer = csv.DictWriter(
+                stream, fieldnames=("row_index", *statistic_names())
+            )
+            writer.writeheader()
+            writer.writerows(
+                asdict(replace(summary, row_index=index)) for index in indices
+            )
+    return directories
+
+
+def test_collect_chunk_summaries(
+    summary_directories: list[Path], tmp_path: Path
+) -> None:
+    import csv
+
+    from injstar.products import collect_summaries
+
+    target = tmp_path / "combined.csv"
+    assert collect_summaries(reversed(summary_directories), target) == target
+    with target.open() as stream:
+        assert [int(row["row_index"]) for row in csv.DictReader(stream)] == [
+            2,
+            3,
+            10,
+            100,
+        ]
+    before = target.read_bytes()
+    with pytest.raises(ValueError, match="exists"):
+        collect_summaries(summary_directories, target)
+    assert target.read_bytes() == before
+    collect_summaries([summary_directories[-1]], target, overwrite=True)
+    with target.open() as stream:
+        assert list(csv.DictReader(stream)) == []
+
+
+@pytest.mark.parametrize(
+    "problem", ["duplicates", "missing", "columns", "empty", "values"]
+)
+def test_collect_validates_before_writing(
+    summary_directories: list[Path], tmp_path: Path, problem: str
+) -> None:
+    from injstar.products import collect_summaries
+
+    directories = summary_directories
+    if problem == "duplicates":
+        directories = [*directories, directories[0]]
+    elif problem == "missing":
+        (directories[1] / "summary.csv").unlink()
+    elif problem == "columns":
+        (directories[1] / "summary.csv").write_text("row_index,bogus\n")
+    elif problem == "values":
+        path = directories[1] / "summary.csv"
+        path.write_text(path.read_text().replace("100,1.0", "100,invalid"))
+    else:
+        directories = []
+    output = tmp_path / "combined.csv"
+    output.write_text("keep")
+    with pytest.raises((ValueError, FileNotFoundError)):
+        collect_summaries(directories, output, overwrite=True)
+    assert output.read_text() == "keep"

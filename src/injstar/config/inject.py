@@ -13,6 +13,9 @@ from pydantic import BaseModel, Field, model_validator
 from ._common import _STRICT, Positive, load_config, prepare_directory, write_config
 
 if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
+
     from injstar.dataset import InjectionResult
     from injstar.detector.network import DetectorRegistry
     from injstar.population import Population
@@ -45,6 +48,8 @@ class InjectConfig(BaseModel):
         Detector registry TOML layers merged over the packaged defaults.
     population
         Population file (CSV or HDF5).
+    start, stop
+        Zero-based, half-open population row range; omitted stop reads to EOF.
     output_dir
         Run directory.
     waveform_approximant
@@ -77,6 +82,8 @@ class InjectConfig(BaseModel):
     detector_config: tuple[Path, ...] = ()
     population: Path
     output_dir: Path
+    start: Annotated[int, Field(ge=0)] = 0
+    stop: Annotated[int | None, Field(ge=0)] = None
 
     waveform_approximant: str = "IMRPhenomD"
     template_approximant: str | None = None
@@ -95,6 +102,8 @@ class InjectConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate(self) -> Self:
+        if self.stop is not None and self.stop <= self.start:
+            raise ValueError("stop must exceed start")
         if self.maximum_frequency <= self.minimum_frequency:
             raise ValueError("maximum_frequency must exceed minimum_frequency")
         if self.maximum_frequency > self.sampling_frequency / 2:
@@ -142,11 +151,14 @@ class Inputs:
         Registry restricted to the configured network.
     population
         Canonical population columns.
+    rows
+        Original zero-based population row indices.
     """
 
     config: InjectConfig
     registry: DetectorRegistry
     population: Population
+    rows: NDArray[np.uint64]
 
 
 def load_inputs(config: InjectConfig) -> Inputs:
@@ -157,12 +169,16 @@ def load_inputs(config: InjectConfig) -> Inputs:
     config
         Run configuration.
     """
+    import numpy as np
+
     from injstar import products
     from injstar.detector.network import load_detector_config
     from injstar.population import read_population
 
     registry = load_detector_config(config.detector_config).select(config.network)
-    population = read_population(config.population)
+    population = read_population(
+        config.population, start=config.start, stop=config.stop
+    )
     generated = {
         "network_snr",
         "detected",
@@ -178,7 +194,13 @@ def load_inputs(config: InjectConfig) -> Inputs:
         raise ValueError(
             f"population columns collide with generated outputs: {sorted(collisions)}"
         )
-    return Inputs(config, registry, population)
+    count = len(next(iter(population.values())))
+    return Inputs(
+        config,
+        registry,
+        population,
+        np.arange(config.start, config.start + count, dtype=np.uint64),
+    )
 
 
 def _simulation_batches(inputs: Inputs) -> Iterator[InjectionResult]:
@@ -215,11 +237,12 @@ def _simulation_batches(inputs: Inputs) -> Iterator[InjectionResult]:
         detector_snr=config.detection.detector_snr,
         network_snr=config.detection.network_snr,
         min_detectors=config.detection.min_detectors,
+        rows=inputs.rows,
     )
 
 
 def _run(config: InjectConfig, *, overwrite: bool = False) -> Path:
-    """Simulate every injection and write ``injections.h5``.
+    """Simulate selected injections and write ``injections.h5``.
 
     Parameters
     ----------

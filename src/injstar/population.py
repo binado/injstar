@@ -7,8 +7,10 @@ Extra columns retain their names.
 
 from pathlib import Path
 
+import h5py
 import numpy as np
-from gwmock_pop.loaders.file_loader import read_population_catalogue
+import polars as pl
+from gwmock_pop.loaders.file_loader import infer_population_file_format
 from numpy.typing import NDArray
 
 #: Columns the pipeline uses, in output order.
@@ -48,21 +50,55 @@ _ZERO_DEFAULTS = (
 Population = dict[str, NDArray]
 
 
-def read_population(path: Path) -> Population:
+def read_population(
+    path: Path, *, start: int = 0, stop: int | None = None
+) -> Population:
     """Read a catalogue in row order, adding defaults.
 
     Parameters
     ----------
     path
         CSV or HDF5 catalogue in gwmock-pop format.
+    start, stop
+        Zero-based, half-open row range. Omitted stop reads to EOF; stops
+        beyond EOF are clipped. CSV scans preceding lines sequentially;
+        prefer HDF5 for large populations.
 
     Returns
     -------
     dict of str to ndarray
         Simulation columns followed by the remaining input columns.
     """
-    columns = read_population_catalogue(path)
-    count = len(next(iter(columns.values())))
+    if start < 0 or (stop is not None and (stop < 0 or stop <= start)):
+        raise ValueError("population range requires 0 <= start < stop")
+    if infer_population_file_format(path) == "csv":
+        length = None if stop is None else stop - start
+        frame = pl.scan_csv(
+            path,
+            skip_rows_after_header=start,
+            n_rows=length,
+            infer_schema_length=length,
+            raise_if_empty=False,
+        ).collect()
+        columns = {
+            name: series.to_numpy().astype(str)
+            if series.dtype == pl.String
+            else series.to_numpy()
+            for name, series in zip(frame.columns, frame, strict=True)
+        }
+    else:
+        with h5py.File(path, "r") as file:
+            source = file["data"]
+            if isinstance(source, h5py.Dataset):
+                data = source[start:stop]
+                if data.dtype.names is None:
+                    raise ValueError("HDF5 catalogue must provide named columns")
+                columns = {name: data[name] for name in data.dtype.names}
+            else:
+                columns = {name: source[name][start:stop] for name in source}
+    count = len(next(iter(columns.values()))) if columns else 0
+    if count == 0:
+        raise ValueError("population selection contains no rows")
     for name in _ZERO_DEFAULTS:
         columns.setdefault(name, np.zeros(count))
     missing = [name for name in CANONICAL_COLUMNS if name not in columns]

@@ -190,24 +190,27 @@ def _run(
         ) as pool:
             for start in range(0, len(todo), config.batch_size):
                 rows = todo[start : start + config.batch_size]
+                positions = todo_positions[start : start + config.batch_size]
                 drawn = InjectionResult.read(
                     source / io.INJECTION_RESULTS_FILE,
-                    selection=todo_positions[start : start + config.batch_size],
+                    selection=positions,
                 )
                 batch = [
                     Event(
                         row_index=int(row),
-                        right_ascension=float(columns["right_ascension"][row]),
-                        declination=float(columns["declination"][row]),
-                        distance=float(columns["distance"][row]),
-                        coa_time=float(columns["coa_time"][row]),
+                        right_ascension=float(columns["right_ascension"][position]),
+                        declination=float(columns["declination"][position]),
+                        distance=float(columns["distance"][position]),
+                        coa_time=float(columns["coa_time"][position]),
                         series=np.asarray(drawn.series[index]),
                         epochs=np.asarray(drawn.epochs[index]),
                         snr=np.asarray(drawn.observed_snr[index]),
                         bandwidth=np.asarray(drawn.bandwidth[index]),
                         horizon=np.asarray(drawn.horizon[index]),
                     )
-                    for index, row in enumerate(rows)
+                    for index, (row, position) in enumerate(
+                        zip(rows, positions, strict=True)
+                    )
                 ]
                 for _ in pool.map(task, batch):
                     pass
