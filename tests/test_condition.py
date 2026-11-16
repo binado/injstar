@@ -1,9 +1,9 @@
 """Compare injstar's detector inputs with ``ligo.skymap.bayestar.condition``.
 
-The same zero-noise SNR series is handed to ``condition``. The outputs differ
-only where the inputs differ: injstar's response tensors are geodetic where
-LAL's are tabulated, and its horizon comes from ripplegw's IMRPhenomD where
-``condition`` integrates LAL's.
+The same zero-noise SNR series is handed to ``condition``. The reference PSD
+restricts its conditioned LAL template to the injection band: conditioning
+otherwise adds power below the requested low-frequency cutoff. The horizon
+comparison accounts for trapezoidal versus rectangular endpoint weighting.
 """
 
 from dataclasses import dataclass
@@ -12,6 +12,7 @@ import lal
 import numpy as np
 import pytest
 from ligo.skymap import bayestar
+from ligo.skymap.bayestar import filter
 from ligo.skymap.io import events
 from numpy.typing import NDArray
 
@@ -22,6 +23,8 @@ from .tolerances import assert_close
 
 PSD_DELTA_F = 0.25
 PSD_F_MAX = 2048.0
+MINIMUM_FREQUENCY = 20.0
+MAXIMUM_FREQUENCY = 1024.0
 
 
 class _Single(events.SingleEvent):
@@ -71,13 +74,14 @@ def _psd(registry: DetectorRegistry, name: str) -> lal.REAL8FrequencySeries:
     series = lal.CreateREAL8FrequencySeries(
         "psd", 0, 0.0, PSD_DELTA_F, lal.DimensionlessUnit, len(frequencies)
     )
-    series.data.data = np.where(np.isfinite(values) & (frequencies > 0), values, np.inf)
+    in_band = (frequencies >= MINIMUM_FREQUENCY) & (frequencies <= MAXIMUM_FREQUENCY)
+    series.data.data = np.where(in_band & np.isfinite(values), values, np.inf)
     return series
 
 
 @dataclass(frozen=True)
 class Reference:
-    """Output of ``bayestar.condition``."""
+    """Output of ``bayestar.condition`` and its squared-horizon correction."""
 
     epoch: lal.LIGOTimeGPS
     sampling_frequency: float
@@ -86,6 +90,7 @@ class Reference:
     responses: NDArray[np.float64]
     locations: NDArray[np.float64]
     horizons: NDArray[np.float64]
+    horizon_endpoint_corrections: NDArray[np.float64]
 
 
 @pytest.fixture
@@ -93,27 +98,50 @@ def reference(
     event_and_network: tuple[Event, Network], registry: DetectorRegistry
 ) -> Reference:
     event, network = event_and_network
+    psds = [_psd(registry, name) for name in network.names]
     singles = [
-        _Single(name, event, index, _psd(registry, name), network.sampling_frequency)
-        for index, name in enumerate(network.names)
+        _Single(name, event, index, psd, network.sampling_frequency)
+        for index, (name, psd) in enumerate(zip(network.names, psds))
     ]
+    template = filter.sngl_inspiral_psd(
+        "IMRPhenomD", f_min=MINIMUM_FREQUENCY, **_Event.template_args
+    )
+    endpoint_corrections = []
+    for psd in psds:
+        model = filter.SignalModel(
+            filter.signal_psd_series(
+                template,
+                filter.InterpolatedPSD(filter.abscissa(psd), psd.data.data),
+            )
+        )
+        # SignalModel trims zero-weight bins, then gives each nonzero endpoint
+        # half weight. Restore those halves to match injstar's rectangle sum.
+        endpoint_corrections.append(
+            0.5 * model.dw * (model.denom_integrand[0] + model.denom_integrand[-1])
+        )
     return Reference(
         *bayestar.condition(
-            _Event(singles), waveform="IMRPhenomD", f_low=20.0, f_high_truncate=1.0
-        )
+            _Event(singles),
+            waveform="IMRPhenomD",
+            f_low=MINIMUM_FREQUENCY,
+            f_high_truncate=1.0,
+        ),
+        horizon_endpoint_corrections=np.asarray(endpoint_corrections),
     )
 
 
-def test_geodetic_responses_match_lal_tensors_to_1e_3(
+def test_geodetic_responses_match_lal_tensors(
     reference: Reference, event_and_network: tuple[Event, Network]
 ) -> None:
-    # The audit records up to 3e-4 for H1 and L1 and 2e-3 for K1 (not in HLV).
     assert_close(
         event_and_network[1].responses, reference.responses, promote_dtypes=True
     )
 
 
-def test_horizons_match_lal_template_within_half_a_percent(
+def test_horizons_match_lal_template_with_endpoint_correction(
     reference: Reference, event_and_network: tuple[Event, Network]
 ) -> None:
-    assert_close(event_and_network[0].horizon, reference.horizons)
+    rectangle_horizons = np.sqrt(
+        reference.horizons**2 + reference.horizon_endpoint_corrections
+    )
+    assert_close(event_and_network[0].horizon, rectangle_horizons)

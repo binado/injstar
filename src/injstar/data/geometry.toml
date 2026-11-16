@@ -10,8 +10,8 @@ longitude_rad = -2.084056769166123  # Original: -119.4076571388889 deg; "-(119 +
 elevation_m = 142.554
 xarm_azimuth_rad = 5.65487724843714  # Original: 125.9994 deg, counter-clockwise from East
 yarm_azimuth_rad = 4.084080921642243  # Original: 215.9994 deg, counter-clockwise from East
-xarm_tilt_rad = -1.0812314716104872e-05  # Original: -0.0006195 deg
-yarm_tilt_rad = 2.181661564992912e-07  # Original: 1.25e-05 deg
+xarm_tilt_rad = -0.0006195  # LAL arm altitude, radians
+yarm_tilt_rad = 1.25e-05  # LAL arm altitude, radians
 
 # LIGO Livingston
 [detectors.L1.geometry]
@@ -20,8 +20,8 @@ longitude_rad = -1.584309370782929  # Original: -90.77424038888888 deg; "-(90 + 
 elevation_m = -6.574
 xarm_azimuth_rad = 4.403177723455114  # Original: 197.7165 deg, counter-clockwise from East
 yarm_azimuth_rad = 2.8323813966602174  # Original: 287.7165 deg, counter-clockwise from East
-xarm_tilt_rad = -5.447172595474303e-06  # Original: -0.0003121 deg
-yarm_tilt_rad = -1.065872574192937e-05  # Original: -0.0006107 deg
+xarm_tilt_rad = -0.0003121  # LAL arm altitude, radians
+yarm_tilt_rad = -0.0006107  # LAL arm altitude, radians
 
 # Virgo
 [detectors.V1.geometry]
@@ -38,8 +38,8 @@ longitude_rad = 2.3964410153317584  # Original: 137.30595603055556 deg; "137 + 1
 elevation_m = 414.181
 xarm_azimuth_rad = 1.0541131546659037  # Original: 29.603765108422728 deg, counter-clockwise from East; "90 - 60.39623489157727"
 yarm_azimuth_rad = 5.766505430436702  # Original: 119.60357629670688 deg, counter-clockwise from East; "90 + 29.60357629670688"
-xarm_tilt_rad = 5.4827773122149866e-05  # Original: 0.0031414 deg
-yarm_tilt_rad = -6.330309196983434e-05  # Original: -0.003627 deg
+xarm_tilt_rad = 0.0031414  # LAL arm altitude, radians
+yarm_tilt_rad = -0.003627  # LAL arm altitude, radians
 
 # ET triangular shape 1/3
 [detectors.E1.geometry]
@@ -109,8 +109,8 @@ longitude_rad = -2.084056769166123  # Original: -119.4076571388889 deg; "-(119 +
 elevation_m = 142.554
 xarm_azimuth_rad = 5.65487724843714  # Original: 125.9994 deg, counter-clockwise from East
 yarm_azimuth_rad = 4.084080921642243  # Original: 215.9994 deg, counter-clockwise from East
-xarm_tilt_rad = -1.0812314716104872e-05  # Original: -0.0006195 deg
-yarm_tilt_rad = 2.181661564992912e-07  # Original: 1.25e-05 deg
+xarm_tilt_rad = -0.0006195  # LAL arm altitude, radians
+yarm_tilt_rad = 1.25e-05  # LAL arm altitude, radians
 
 # Cosmic Explorer at Livingston
 [detectors.C2.geometry]
@@ -119,5 +119,5 @@ longitude_rad = -1.584309370782929  # Original: -90.77424038888888 deg; "-(90 + 
 elevation_m = -6.574
 xarm_azimuth_rad = 4.403177723455114  # Original: 197.7165 deg, counter-clockwise from East
 yarm_azimuth_rad = 2.8323813966602174  # Original: 287.7165 deg, counter-clockwise from East
-xarm_tilt_rad = -5.447172595474303e-06  # Original: -0.0003121 deg
-yarm_tilt_rad = -1.065872574192937e-05  # Original: -0.0006107 deg
+xarm_tilt_rad = -0.0003121  # LAL arm altitude, radians
+yarm_tilt_rad = -0.0006107  # LAL arm altitude, radians
