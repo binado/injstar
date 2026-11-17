@@ -28,8 +28,8 @@ class DetectorGeometry:
     def location(self) -> NDArray[np.float64]:
         """Earth-fixed WGS-84 vertex location in metres, read-only."""
         return detector_location(
-            latitude_rad=self.latitude_rad,
-            longitude_rad=self.longitude_rad,
+            latitude=self.latitude_rad,
+            longitude=self.longitude_rad,
             elevation_m=self.elevation_m,
         )
 
@@ -37,20 +37,35 @@ class DetectorGeometry:
     def response_tensor(self) -> NDArray[np.float64]:
         """Half the difference of arm outer products, read-only float64."""
         return detector_response_tensor(
-            latitude_rad=self.latitude_rad,
-            longitude_rad=self.longitude_rad,
-            xarm_azimuth_rad=self.xarm_azimuth_rad,
-            yarm_azimuth_rad=self.yarm_azimuth_rad,
-            xarm_tilt_rad=self.xarm_tilt_rad,
-            yarm_tilt_rad=self.yarm_tilt_rad,
+            latitude=self.latitude_rad,
+            longitude=self.longitude_rad,
+            xarm_azimuth=self.xarm_azimuth_rad,
+            yarm_azimuth=self.yarm_azimuth_rad,
+            xarm_tilt=self.xarm_tilt_rad,
+            yarm_tilt=self.yarm_tilt_rad,
         )
 
 
 def detector_location(
-    *, latitude_rad: float, longitude_rad: float, elevation_m: float
+    *, latitude: float, longitude: float, elevation_m: float
 ) -> NDArray[np.float64]:
-    """Earth-fixed WGS-84 vertex location in metres, read-only."""
-    lat, lon = latitude_rad, longitude_rad
+    """Calculate the Earth-fixed WGS-84 vertex location.
+
+    Parameters
+    ----------
+    latitude
+        Geodetic latitude in radians.
+    longitude
+        Geodetic longitude in radians.
+    elevation_m
+        Height above the WGS-84 ellipsoid in metres.
+
+    Returns
+    -------
+    NDArray[np.float64]
+        Read-only Earth-fixed vertex location in metres, with shape ``(3,)``.
+    """
+    lat, lon = latitude, longitude
     eccentricity_squared = WGS84_FLATTENING * (2 - WGS84_FLATTENING)
     radius = WGS84_SEMI_MAJOR_AXIS_M / math.sqrt(
         1 - eccentricity_squared * math.sin(lat) ** 2
@@ -69,15 +84,32 @@ def detector_location(
 
 def detector_response_tensor(
     *,
-    latitude_rad: float,
-    longitude_rad: float,
-    xarm_azimuth_rad: float,
-    yarm_azimuth_rad: float,
-    xarm_tilt_rad: float,
-    yarm_tilt_rad: float,
+    latitude: float,
+    longitude: float,
+    xarm_azimuth: float,
+    yarm_azimuth: float,
+    xarm_tilt: float,
+    yarm_tilt: float,
 ) -> NDArray[np.float64]:
-    """Earth-fixed response tensor, the half difference of arm products."""
-    lat, lon = latitude_rad, longitude_rad
+    """Calculate the Earth-fixed response tensor for two detector arms.
+
+    Parameters
+    ----------
+    latitude
+        Geodetic latitude in radians.
+    longitude
+        Geodetic longitude in radians.
+    xarm_azimuth, yarm_azimuth
+        Arm azimuths in radians, clockwise from North.
+    xarm_tilt, yarm_tilt
+        Arm tilts in radians above the local horizontal plane.
+
+    Returns
+    -------
+    NDArray[np.float64]
+        Read-only Earth-fixed response tensor with shape ``(3, 3)``.
+    """
+    lat, lon = latitude, longitude
     north = np.array(
         [
             -math.sin(lat) * math.cos(lon),
@@ -100,8 +132,8 @@ def detector_response_tensor(
             + math.sin(tilt) * up
         )
 
-    x = arm(xarm_azimuth_rad, xarm_tilt_rad)
-    y = arm(yarm_azimuth_rad, yarm_tilt_rad)
+    x = arm(xarm_azimuth, xarm_tilt)
+    y = arm(yarm_azimuth, yarm_tilt)
     result = (np.outer(x, x) - np.outer(y, y)) / 2
     result.setflags(write=False)
     return result
