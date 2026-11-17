@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from injstar.detector.config import DetectorRegistry, load_detector_config
+from injstar.detector.config import DetectorRegistry
 from injstar.detector.network import DetectorGeometry
 from injstar.detector.psd import NOISE_CURVES_BASE_DIR
 
@@ -86,7 +86,7 @@ def test_user_layer_adds_detector_and_network(tmp_path: Path) -> None:
         '[networks]\nmine = ["X1", "H1"]\n'
     )
 
-    registry = load_detector_config([layer])
+    registry = DetectorRegistry.load([layer])
 
     assert registry.members("mine") == ("X1", "H1")
     assert registry.detectors["H1"].psd_reference == "kagra_128Mpc_psd.txt"
@@ -94,7 +94,7 @@ def test_user_layer_adds_detector_and_network(tmp_path: Path) -> None:
     frequencies = np.array([1.0, 30.0, 100.0, 1e6])
     assert_close(
         registry.detectors["X1"].sensitivity(frequencies),
-        load_detector_config().detectors["H1"].sensitivity(frequencies),
+        DetectorRegistry.load().detectors["H1"].sensitivity(frequencies),
     )
 
 
@@ -103,7 +103,7 @@ def test_missing_psd_file_fails_validation(tmp_path: Path) -> None:
     layer.write_text('[detectors.H1]\npsd_reference = "missing.txt"\n')
 
     with pytest.raises(ValidationError, match="Could not resolve PSD reference"):
-        load_detector_config([layer])
+        DetectorRegistry.load([layer])
 
 
 def test_sensitivity_is_infinite_out_of_band(registry: DetectorRegistry) -> None:

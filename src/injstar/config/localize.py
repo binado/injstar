@@ -119,7 +119,7 @@ def _run(
     from gwmock_pop.loaders.file_loader import read_population_catalogue
 
     from injstar import io, products
-    from injstar.detector.config import load_detector_config
+    from injstar.detector.config import DetectorRegistry
     from injstar.runtime import set_cpu_threads
 
     from ._common import RunDirectoryError
@@ -133,7 +133,7 @@ def _run(
     for name in (io.CONFIG_FILE, io.INJECTIONS_FILE, io.INJECTION_RESULTS_FILE):
         if not (source / name).is_file():
             raise RunDirectoryError(f"{source} has no completed {name}")
-    registry = load_detector_config(config.detector_config).select(config.network)
+    registry = DetectorRegistry.load(config.detector_config).select(config.network)
     with h5py.File(source / io.INJECTION_RESULTS_FILE, "r") as saved:
         names = tuple(saved.attrs["detectors"])
         rate = float(saved.attrs["sampling_frequency"])

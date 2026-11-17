@@ -6,7 +6,7 @@ from numpy.typing import NDArray
 
 from injstar.config import InjectConfig
 from injstar.dataset import InjectionResult
-from injstar.detector.config import DetectorRegistry, load_detector_config
+from injstar.detector.config import DetectorRegistry
 from injstar.detector.network import DetectorGeometry
 from injstar.detector.projection import Detector
 from injstar.inject import greenwich_sidereal_time, inject_events
@@ -101,7 +101,7 @@ def pycbc_detector() -> type[PycbcDetector]:
 
 @pytest.fixture(scope="session")
 def registry() -> DetectorRegistry:
-    return load_detector_config()
+    return DetectorRegistry.load()
 
 
 @pytest.fixture

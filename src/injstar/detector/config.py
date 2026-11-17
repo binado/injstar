@@ -71,6 +71,34 @@ class DetectorRegistry(BaseModel):
             self._check_members(f"network {name!r}", members)
         return self
 
+    @classmethod
+    def load(cls, paths: Sequence[Path] = ()) -> "DetectorRegistry":
+        """Merge packaged detector definitions and ordered TOML registry layers.
+
+        Later layers override earlier geometry, sensitivities and network
+        membership. A relative ``psd_reference`` naming a file beside its layer
+        is resolved against that layer's directory. Only ``[detectors]`` and
+        ``[networks]`` are accepted. Validation checks that each PSD reference
+        resolves to a file; the curve itself is read on first use.
+
+        Parameters
+        ----------
+        paths
+            Existing TOML files, merged in order after the packaged defaults.
+
+        Raises
+        ------
+        ValueError
+            If the merged config is not a valid registry.
+        """
+        merged: dict[str, Any] = {}
+        for path in (*DETECTOR_DEFAULT_PATHS, *paths):
+            with Path(path).open("rb") as handle:
+                layer = tomllib.load(handle)
+            _anchor_psd_references(layer, Path(path).resolve().parent)
+            _deep_merge(merged, layer)
+        return cls.model_validate(merged)
+
     def _check_members(self, what: str, members: Sequence[str]) -> None:
         if not members or len(set(members)) != len(members):
             raise ValueError(f"{what} must contain distinct detectors and be non-empty")
@@ -160,31 +188,3 @@ def _anchor_psd_references(layer: dict[str, Any], directory: Path) -> None:
         reference = table.get("psd_reference") if isinstance(table, dict) else None
         if isinstance(reference, str) and (directory / reference).is_file():
             table["psd_reference"] = str((directory / reference).resolve())
-
-
-def load_detector_config(paths: Sequence[Path] = ()) -> DetectorRegistry:
-    """Merge packaged detector definitions and ordered TOML registry layers.
-
-    Later layers override earlier geometry, sensitivities and network
-    membership. A relative ``psd_reference`` naming a file beside its layer is
-    resolved against that layer's directory. Only ``[detectors]`` and
-    ``[networks]`` are accepted. Validation checks that each PSD reference
-    resolves to a file; the curve itself is read on first use.
-
-    Parameters
-    ----------
-    paths
-        Existing TOML files, merged in order after the packaged defaults.
-
-    Raises
-    ------
-    ValueError
-        If the merged config is not a valid registry.
-    """
-    merged: dict[str, Any] = {}
-    for path in (*DETECTOR_DEFAULT_PATHS, *paths):
-        with Path(path).open("rb") as handle:
-            layer = tomllib.load(handle)
-        _anchor_psd_references(layer, Path(path).resolve().parent)
-        _deep_merge(merged, layer)
-    return DetectorRegistry.model_validate(merged)
