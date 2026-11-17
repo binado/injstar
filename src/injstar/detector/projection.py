@@ -13,7 +13,7 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 
 from injstar.constants import SPEED_OF_LIGHT_M_S
-from injstar.detector.network import DetectorGeometry
+from injstar.detector.geometry import DetectorGeometry
 
 
 class Detector[ArrayT](Protocol):

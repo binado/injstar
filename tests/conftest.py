@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 from injstar.config import InjectConfig
 from injstar.dataset import InjectionResult
 from injstar.detector.config import DetectorRegistry
-from injstar.detector.network import DetectorGeometry
+from injstar.detector.geometry import DetectorGeometry
 from injstar.detector.projection import Detector
 from injstar.inject import greenwich_sidereal_time, inject_events
 from injstar.localize import Event, Network

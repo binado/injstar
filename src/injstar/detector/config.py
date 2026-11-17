@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from injstar.detector.network import DetectorGeometry
+from injstar.detector.geometry import DetectorGeometry
 from injstar.detector.psd import PsdKind, Sensitivity, resolve_psd_path
 
 DETECTOR_DEFAULT_PATHS = tuple(
