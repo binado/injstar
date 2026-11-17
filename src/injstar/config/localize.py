@@ -119,7 +119,7 @@ def _run(
     from gwmock_pop.loaders.file_loader import read_population_catalogue
 
     from injstar import io, products
-    from injstar.detector.network import load_detector_config
+    from injstar.detector.config import load_detector_config
     from injstar.runtime import set_cpu_threads
 
     from ._common import RunDirectoryError

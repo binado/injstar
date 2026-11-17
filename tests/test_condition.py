@@ -16,7 +16,7 @@ from ligo.skymap.bayestar import filter
 from ligo.skymap.io import events
 from numpy.typing import NDArray
 
-from injstar.detector.network import DetectorRegistry
+from injstar.detector.config import DetectorRegistry
 from injstar.localize import Event, Network
 
 from .tolerances import assert_close
