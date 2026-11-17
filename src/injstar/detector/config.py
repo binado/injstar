@@ -2,6 +2,7 @@
 
 import tomllib
 from collections.abc import Mapping, Sequence
+from functools import cached_property
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -40,9 +41,9 @@ class DetectorConfig(BaseModel):
             raise ValueError(f"PSD reference must be a file: {self.psd_reference!r}")
         return self
 
-    @property
+    @cached_property
     def sensitivity(self) -> Sensitivity:
-        """A fresh :class:`~injstar.detector.psd.Sensitivity` for this detector."""
+        """The cached sensitivity for this detector."""
         return Sensitivity(self.psd_reference, self.psd_kind)
 
 

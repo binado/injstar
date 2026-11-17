@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import lal
 import numpy as np
@@ -111,3 +112,16 @@ def test_sensitivity_is_infinite_out_of_band(registry: DetectorRegistry) -> None
 
     assert np.isinf(psd[0]) and np.isinf(psd[2])
     assert 0 < psd[1] < 1e-40
+
+
+def test_sensitivity_loads_curve_once() -> None:
+    from injstar.detector.psd import load_spectral_series
+
+    detector = DetectorRegistry.load().detectors["H1"]
+    with patch(
+        "injstar.detector.psd.load_spectral_series", wraps=load_spectral_series
+    ) as load:
+        detector.sensitivity(np.array([30.0]))
+        detector.sensitivity(np.array([100.0]))
+
+    assert load.call_count == 1
