@@ -60,7 +60,7 @@ from numpy.typing import NDArray
 from injstar import matched_filter
 from injstar.dataset import ARRAY_FIELDS, InjectionResult
 from injstar.detector import projection
-from injstar.detector.network import DetectorRegistry
+from injstar.detector.config import DetectorRegistry
 from injstar.detector.noise import simulate_fd_noise
 from injstar.waveform import WaveformGenerator
 

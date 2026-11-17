@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from injstar.dataset import InjectionResult
-    from injstar.detector.network import DetectorRegistry
+    from injstar.detector.config import DetectorRegistry
     from injstar.population import Population
 
 logger = logging.getLogger(__name__)
@@ -172,10 +172,10 @@ def load_inputs(config: InjectConfig) -> Inputs:
     import numpy as np
 
     from injstar import products
-    from injstar.detector.network import load_detector_config
+    from injstar.detector.config import DetectorRegistry
     from injstar.population import read_population
 
-    registry = load_detector_config(config.detector_config).select(config.network)
+    registry = DetectorRegistry.load(config.detector_config).select(config.network)
     population = read_population(
         config.population, start=config.start, stop=config.stop
     )
