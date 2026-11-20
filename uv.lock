@@ -702,7 +702,7 @@ wheels = [
 
 [[package]]
 name = "gwmock-pop"
-version = "0.19.0"
+version = "0.19.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "gwmock-data" },
@@ -713,9 +713,9 @@ dependencies = [
     { name = "ruyaml" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/90/1296e684a31094051de27a04dc0ede6b4da6fcc3117773e4d0ed8d2fee10/gwmock_pop-0.19.0.tar.gz", hash = "sha256:8206bfd0053df6a929380a00a9a7debf7fc89e7f5ff5ad4be12494c406e5d81b", size = 536276, upload-time = "2026-11-11T07:35:23.502Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/c5/5ce4ff132095cf864544c651c1f2c4368e97e6dc52d5fcd78e185ecae8ae/gwmock_pop-0.19.1.tar.gz", hash = "sha256:7f20e6047c7d9081c14591a6da182e1a2ad6b38bb7d9bfef6449d4e83f4be2a7", size = 540146, upload-time = "2026-11-17T06:53:37.176Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/75/79/a27772b92d073f4ea82f40b431d0f04c62ef5ab6f2b177e81964752d527c/gwmock_pop-0.19.0-py3-none-any.whl", hash = "sha256:ba7d101539548b9064ac4ee3d46f104b158f65704411f89b67fff6b710f7421e", size = 204716, upload-time = "2026-11-11T07:35:21.881Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/95/f20c91437a1344df6699df13fc4ae1c1522a1036b3736ba6d46866b19e27/gwmock_pop-0.19.1-py3-none-any.whl", hash = "sha256:eeba01b4b6efb4624ef130f7f1f92ae72b4ec8ba12bc34cb7aa5c24fed38177d", size = 204717, upload-time = "2026-11-17T06:53:35.697Z" },
 ]
 
 [[package]]
